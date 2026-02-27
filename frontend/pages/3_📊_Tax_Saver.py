@@ -132,3 +132,159 @@ if st.button("Generate PDF", use_container_width=True):
                 use_container_width=True,
             )
 
+
+# ── 💡 Hidden Deductions from GST Data ─────────────────
+st.divider()
+st.markdown("### 💡 Hidden Deductions from Your GST Data")
+st.caption("Cross-layer intelligence: TaxIQ scans your GST invoices to find ITR deductions you may have missed.")
+
+DEMO_HIDDEN_DEDUCTIONS = [
+    {"invoice": "INV-2024-001", "vendor": "MediPlus Pharma", "hsn": "3004",
+     "section": "80D", "description": "Health insurance premium / medical supplies",
+     "invoice_amount": 48000, "estimated_tax_saved": 14976},
+    {"invoice": "INV-2024-015", "vendor": "EduTech Solutions", "hsn": "4901",
+     "section": "80C", "description": "Tuition fees / educational expenses",
+     "invoice_amount": 75000, "estimated_tax_saved": 23400},
+    {"invoice": "INV-2024-022", "vendor": "LIC Premium", "hsn": "9971",
+     "section": "80C", "description": "Life insurance premium",
+     "invoice_amount": 50000, "estimated_tax_saved": 15600},
+    {"invoice": "INV-2024-038", "vendor": "HomeFirst Finance", "hsn": "9972",
+     "section": "24(b)", "description": "Home loan interest payment",
+     "invoice_amount": 180000, "estimated_tax_saved": 56160},
+]
+
+try:
+    with httpx.Client(timeout=30) as client:
+        enrichment_res = client.post(
+            f"{BACKEND_URL}/api/tax/enrichment",
+            json={"invoices": analysis.get("classified_txns", [])},
+        )
+    if enrichment_res.status_code == 200:
+        hidden = enrichment_res.json().get("deductions", DEMO_HIDDEN_DEDUCTIONS)
+        demo_cross = False
+    else:
+        raise Exception()
+except Exception:
+    hidden = DEMO_HIDDEN_DEDUCTIONS
+    demo_cross = True
+
+if demo_cross:
+    st.markdown(
+        '<span style="display:inline-block;padding:2px 10px;border-radius:999px;'
+        'background:rgba(253,203,110,.15);border:1px solid #FDCB6E;'
+        'color:#FDCB6E;font-size:12px;font-weight:600;">[DEMO DATA]</span>',
+        unsafe_allow_html=True,
+    )
+
+total_hidden = sum(d.get("estimated_tax_saved", 0) for d in hidden)
+st.metric("Total Hidden Tax Savings Found", inr(total_hidden))
+
+for d in hidden:
+    with st.expander(f"🔍 {d.get('section', '')} — {d.get('vendor', '')} — Save {inr(d.get('estimated_tax_saved', 0))}"):
+        c1, c2 = st.columns(2)
+        c1.markdown(f"**Invoice:** {d.get('invoice', '')}")
+        c1.markdown(f"**HSN Code:** {d.get('hsn', '')}")
+        c2.markdown(f"**Section:** {d.get('section', '')}")
+        c2.markdown(f"**Invoice Amount:** {inr(d.get('invoice_amount', 0))}")
+        st.info(f"💡 {d.get('description', '')}")
+
+
+# ── 📅 Investment Calendar ──────────────────────────────
+st.divider()
+st.markdown("### 📅 Your Investment Calendar")
+st.caption("Month-by-month plan to fill all 80C/80D gaps before March 31.")
+
+DEMO_CALENDAR = {
+    "months_remaining": 3,
+    "monthly_plan": [
+        {"month": "January 2025", "investments": [
+            {"section": "80C", "instrument": "ELSS Mutual Fund", "amount": 25000, "priority": "HIGH"},
+            {"section": "80D", "instrument": "Health Insurance Premium", "amount": 12500, "priority": "MEDIUM"},
+        ]},
+        {"month": "February 2025", "investments": [
+            {"section": "80C", "instrument": "PPF Deposit", "amount": 25000, "priority": "HIGH"},
+            {"section": "80CCD", "instrument": "NPS Contribution", "amount": 16667, "priority": "MEDIUM"},
+        ]},
+        {"month": "March 2025", "investments": [
+            {"section": "80C", "instrument": "Tax Saver FD", "amount": 25000, "priority": "HIGH"},
+            {"section": "80D", "instrument": "Preventive Health Checkup", "amount": 5000, "priority": "LOW"},
+        ]},
+    ],
+    "summary": {"total_to_invest": 109167, "total_tax_saved": 34060, "monthly_average": 36389},
+}
+
+try:
+    with httpx.Client(timeout=30) as client:
+        cal_res = client.post(
+            f"{BACKEND_URL}/api/tax/calendar",
+            json={"gap_report": analysis.get("gap_report", {})},
+        )
+    if cal_res.status_code == 200:
+        calendar = cal_res.json()
+        demo_cal = False
+    else:
+        raise Exception()
+except Exception:
+    calendar = DEMO_CALENDAR
+    demo_cal = True
+
+if demo_cal:
+    st.markdown(
+        '<span style="display:inline-block;padding:2px 10px;border-radius:999px;'
+        'background:rgba(253,203,110,.15);border:1px solid #FDCB6E;'
+        'color:#FDCB6E;font-size:12px;font-weight:600;">[DEMO DATA]</span>',
+        unsafe_allow_html=True,
+    )
+
+summary = calendar.get("summary", {})
+s1, s2, s3 = st.columns(3)
+s1.metric("Total to Invest", inr(summary.get("total_to_invest", 0)))
+s2.metric("Tax Saved", inr(summary.get("total_tax_saved", 0)))
+s3.metric("Monthly Average", inr(summary.get("monthly_average", 0)))
+
+# Gantt-style bar chart
+plan = calendar.get("monthly_plan", [])
+section_colors = {"80C": "#FF9933", "80D": "#00B894", "80CCD": "#FDCB6E",
+                  "24(b)": "#74B9FF", "80E": "#A29BFE", "80G": "#FD79A8"}
+
+fig_cal = go.Figure()
+for entry in plan:
+    month = entry.get("month", "")
+    for inv in entry.get("investments", []):
+        sec = inv.get("section", "Other")
+        fig_cal.add_trace(go.Bar(
+            y=[month], x=[inv.get("amount", 0)],
+            name=f"{sec} — {inv.get('instrument', '')}",
+            orientation="h",
+            marker_color=section_colors.get(sec, "#636E72"),
+            text=f"₹{inv.get('amount', 0):,} · {inv.get('instrument', '')}",
+            textposition="inside",
+        ))
+
+fig_cal.update_layout(
+    barmode="stack",
+    template="plotly_dark",
+    paper_bgcolor="#0A1628",
+    plot_bgcolor="#0D1F3C",
+    font_color="#F8F9FA",
+    height=250,
+    margin=dict(l=10, r=10, t=10, b=10),
+    showlegend=False,
+    xaxis_title="Amount (₹)",
+)
+st.plotly_chart(fig_cal, use_container_width=True)
+
+# Monthly expanders
+for entry in plan:
+    month = entry.get("month", "")
+    investments = entry.get("investments", [])
+    total = sum(i.get("amount", 0) for i in investments)
+    with st.expander(f"📅 {month} — Invest {inr(total)}"):
+        for inv in investments:
+            priority = inv.get("priority", "MEDIUM")
+            badge = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(priority, "⚪")
+            st.markdown(
+                f"{badge} **{inv.get('section', '')}** — {inv.get('instrument', '')} "
+                f"— **{inr(inv.get('amount', 0))}** (Priority: {priority})"
+            )
+

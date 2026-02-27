@@ -1,267 +1,278 @@
 """
-TaxIQ — 📨 AI Notice Generator
-Draft GST legal notices using Claude AI with live WebSocket alert panel.
+TaxIQ — 📨 GST Notice Generator
+Two-column: Input → Generated notice. Live GSTN alerts below.
 """
-
-import os
 import json
+import os
 import time
-from datetime import datetime
 
 import httpx
 import streamlit as st
 
-st.set_page_config(page_title="TaxIQ | Notice Generator", page_icon="📨", layout="wide")
+st.set_page_config(page_title="TaxIQ | Notices", page_icon="📨", layout="wide")
 
 BACKEND = os.getenv("TAXIQ_BACKEND_URL", "http://localhost:8000")
 
-# ── Dark theme CSS ──────────────────────────────────────
-st.markdown("""
-<style>
-section.main { background-color: #0A1628; }
-div[data-testid="stAppViewContainer"] { background-color: #0A1628; }
-.demo-badge {
-  display:inline-block; padding:2px 8px; border-radius:999px;
-  border:1px solid rgba(255,153,51,.55);
-  background: rgba(255,153,51,.10);
-  color: #FF9933; font-size: 12px; margin-left: 8px;
-}
-.notice-box {
-  background: #0E1F3E; border: 1px solid #1A3A5C; border-radius: 8px;
-  padding: 20px; font-family: 'Georgia', serif; line-height: 1.7;
-  color: #E0E0E0; white-space: pre-wrap;
-}
-.alert-panel {
-  background: #0E1F3E; border: 1px solid #1A3A5C; border-radius: 8px;
-  padding: 12px; margin-top: 8px;
-}
-.alert-item {
-  padding: 6px 0; border-bottom: 1px solid #1A2E50; font-size: 13px;
-}
-</style>
-""", unsafe_allow_html=True)
+# ── Design System CSS ───────────────────────────────────
+st.markdown("""<style>
+    .stApp { background-color: #0A1628; color: #F8F9FA; }
+    .stMetric { background: #0D1F3C; border-radius: 12px;
+                padding: 16px; border-left: 4px solid #FF9933; }
+    .stButton>button { background: #FF9933; color: #0A1628;
+                       font-weight: 700; border-radius: 8px;
+                       border: none; }
+    div[data-testid="metric-container"] {
+      background: #0D1F3C; border-radius: 10px; padding: 10px; }
+    .demo-badge {
+      display:inline-block; padding:2px 10px; border-radius:999px;
+      background:rgba(253,203,110,.15); border:1px solid #FDCB6E;
+      color:#FDCB6E; font-size:12px; font-weight:600; }
+    .notice-box {
+      background: #0D1F3C; border: 1px solid #FF9933; border-radius: 12px;
+      padding: 24px; font-family: Georgia, serif; line-height: 1.8;
+      color: #F8F9FA; white-space: pre-wrap; }
+    .notice-header { text-align: center; font-size: 18px; font-weight: 700;
+                     color: #FF9933; border-bottom: 2px solid #FF9933;
+                     padding-bottom: 10px; margin-bottom: 16px; }
+    .alert-card { background: #1A0A0A; border-left: 4px solid #D63031;
+                  border-radius: 6px; padding: 10px 14px; margin: 6px 0; }
+</style>""", unsafe_allow_html=True)
 
 
-def api_post(path, json_body=None):
-    with httpx.Client(timeout=90) as c:
-        return c.post(f"{BACKEND}{path}", json=json_body)
+def fmt_inr(n):
+    if n >= 1e7:  return f"₹{n/1e7:.1f}Cr"
+    if n >= 1e5:  return f"₹{n/1e5:.1f}L"
+    return f"₹{n:,.0f}"
 
 
-# ── Demo fallback ───────────────────────────────────────
-DEMO_NOTICE = {
-    "noticeId": "NOTICE-DEMO-M1ZT-FY2023-24",
-    "gstin": "27AADCB2230M1ZT",
-    "taxpayerName": "ABC Enterprises",
-    "demandAmount": 250000,
-    "draft": """OFFICE OF THE ASSISTANT COMMISSIONER
-CENTRAL GOODS AND SERVICES TAX
-DIVISION-II, PUNE
+def api_post(path, payload):
+    with httpx.Client(timeout=30) as c:
+        return c.post(f"{BACKEND}{path}", json=payload)
 
-Ref: CGST/DIV-II/SCN/2024/001
-Date: {date}
+
+def api_get(path, params=None):
+    with httpx.Client(timeout=30) as c:
+        return c.get(f"{BACKEND}{path}", params=params)
+
+
+# ── DEMO CONSTANTS ──────────────────────────────────────
+VIOLATION_TYPES = [
+    "Section 73 — Tax Not Paid / Short Paid",
+    "Section 74 — Fraud / Wilful Misstatement",
+    "Section 61 — Scrutiny of Returns",
+    "Section 65 — Audit by Department",
+    "Section 67 — Inspection / Search",
+    "Section 16(4) — ITC Time Barred",
+    "Section 29 — Registration Cancellation",
+]
+
+NOTICE_TYPES = ["Show Cause Notice (SCN)", "Demand Notice", "Recovery Notice", "Reminder"]
+
+DEMO_NOTICE = """\
+                    OFFICE OF THE COMMISSIONER
+                    CENTRAL GOODS AND SERVICES TAX
+                    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SHOW CAUSE NOTICE
+
+Notice No: SCN/CGST/2024-25/001847
+Date: 15-01-2025
 
 To,
-M/s ABC Enterprises
-GSTIN: 27AADCB2230M1ZT
+M/s Falcon Components Pvt Ltd
+GSTIN: 27AAACF9999K1Z9
+Registered Address: Plot 45, MIDC Andheri East, Mumbai-400093
 
-Subject: Show Cause Notice under Section 73 of CGST Act, 2017 — Mismatch between GSTR-1 and GSTR-3B for FY 2023-24
+Subject: Show Cause Notice under Section 73 of CGST Act, 2017
 
 Sir/Madam,
 
-WHEREAS, upon scrutiny of the returns filed by you for the Financial Year 2023-24, it has been noticed that:
+Whereas, upon scrutiny of your GST returns for the period April 2024 to
+September 2024, the following discrepancies have been observed:
 
-1. The outward supplies declared in GSTR-1 do not match with the summary in GSTR-3B.
-2. Input Tax Credit (ITC) of ₹2,50,000/- has been claimed on invoices not reflected in GSTR-2B of the supplier.
-3. This constitutes a contravention of Section 16(2)(aa) read with Rule 36(4) of the CGST Rules, 2017.
+1. GSTR-1 vs GSTR-3B Mismatch:
+   - Outward supplies declared in GSTR-1: ₹2,45,00,000
+   - Outward supplies declared in GSTR-3B: ₹2,12,00,000
+   - Difference: ₹33,00,000
 
-DETAILS OF DISCREPANCY:
-━━━━━━━━━━━━━━━━━━━━━━
-Assessment Period : FY 2023-24
-Tax Amount Involved: ₹2,50,000/-
-Relevant Section  : Section 73 of CGST Act, 2017
-Rule Reference    : Rule 36(4), CGST Rules, 2017
-━━━━━━━━━━━━━━━━━━━━━━
+2. Input Tax Credit Reversal Not Done:
+   - ITC availed on non-business expenses: ₹4,50,000
+   - ITC on blocked credits (Section 17(5)): ₹1,80,000
+   - Total ITC to be reversed: ₹6,30,000
 
-NOW THEREFORE, you are hereby directed to show cause within SEVEN (7) DAYS from the date of receipt of this notice as to why:
+3. Total Tax Demand:
+   - CGST: ₹2,97,000
+   - SGST: ₹2,97,000
+   - Interest u/s 50: ₹89,100
+   - Total: ₹6,83,100
 
-(a) The excess ITC of ₹2,50,000/- should not be reversed;
-(b) Interest under Section 50 of CGST Act should not be charged;
-(c) Penalty under Section 73(9) should not be imposed.
+You are hereby directed to show cause within THIRTY (30) days from the
+date of receipt of this notice as to why:
 
-You are requested to appear before the undersigned on the date to be intimated, along with all relevant books of accounts, invoices, and documents supporting your claim.
+(a) The tax amount of ₹5,94,000 along with applicable interest shall
+    not be demanded and recovered from you; and
+(b) Penalty under Section 73(9) shall not be imposed.
 
-Failure to respond within the stipulated period shall result in the matter being decided ex-parte based on available records.
+In case of failure to respond within the stipulated time, the matter
+shall be decided ex-parte on the basis of available records.
 
-Sd/-
-Assistant Commissioner, CGST
-Division-II, Pune""".format(date=datetime.now().strftime("%d-%b-%Y")),
-    "billing": {"priceINR": 999, "status": "DEMO"},
-}
+                                        Sd/-
+                                        Shri Rajesh Kumar
+                                        Assistant Commissioner, CGST
+                                        Division-IV, Mumbai Zone
+
+CC: 1. The Commissioner, CGST, Mumbai Zone
+    2. Guard File\
+"""
+
+DEMO_ALERTS = [
+    {"gstin": "19AABCG1234Q1Z2", "name": "GoldStar Traders", "alert": "Return not filed for 3 consecutive months", "risk": "HIGH", "date": "2025-01-14"},
+    {"gstin": "07AABCS7777H1Z1", "name": "Shadow Supplies Delhi", "alert": "Sudden 400% spike in outward supplies", "risk": "CRITICAL", "date": "2025-01-15"},
+    {"gstin": "27AAACF9999K1Z9", "name": "Falcon Components", "alert": "ITC claimed exceeds eligible amount by ₹4.5L", "risk": "MEDIUM", "date": "2025-01-13"},
+]
 
 # ── Header ──────────────────────────────────────────────
-st.markdown("## 📨 AI Legal Notice Generator")
-st.caption("Draft GST demand notices & show-cause notices (SCN) under CGST Act 2017 using Claude AI.")
+st.title("📨 GST Notice Generator")
+st.caption("AI-powered notice drafting · Section-referenced · PDF-ready")
 
 st.divider()
 
-# ── Notice form ─────────────────────────────────────────
-st.markdown("### Notice Parameters")
+# ── Two-column layout ──────────────────────────────────
+input_col, output_col = st.columns([2, 3])
 
-col1, col2 = st.columns(2)
-with col1:
-    violation_type = st.selectbox("Violation Type", [
-        "ITC Mismatch",
-        "Missing Returns",
-        "Circular Trading",
-        "Short Payment",
-        "Wrong HSN",
-    ], help="Type of GST violation")
-    gstin = st.text_input("Taxpayer GSTIN", value="27AADCB2230M1ZT")
-    taxpayer_name = st.text_input("Taxpayer Name", value="ABC Enterprises")
+with input_col:
+    st.markdown("### 📝 Notice Parameters")
 
-with col2:
-    period = st.text_input("Assessment Period", value="FY 2023-24")
-    amount = st.number_input("Demand Amount (₹)", min_value=0, value=250000, step=10000)
-    section_map = {
-        "ITC Mismatch": "73",
-        "Missing Returns": "46",
-        "Circular Trading": "74",
-        "Short Payment": "73",
-        "Wrong HSN": "122",
-    }
-    section = st.text_input("CGST Section", value=section_map.get(violation_type, "73"))
-
-st.divider()
-
-description = st.text_area(
-    "Violation Description",
-    value="Mismatch between GSTR-1 outward supplies and GSTR-3B summary. "
-          "ITC claimed on invoices not reflected in GSTR-2B of the supplier.",
-    height=120,
-)
-
-generate_btn = st.button("🤖 Generate Legal Notice", use_container_width=True, type="primary")
-
-# ── Generate notice ─────────────────────────────────────
-if generate_btn:
-    # Map violation type to notice type
-    notice_type_map = {
-        "ITC Mismatch": "SCN-MISMATCH",
-        "Missing Returns": "SCN-NON-FILING",
-        "Circular Trading": "SCN-CIRCULAR-TRADING",
-        "Short Payment": "DRC-01",
-        "Wrong HSN": "ASMT-10",
-    }
-    payload = {
-        "noticeType": notice_type_map.get(violation_type, "SCN-MISMATCH"),
-        "gstin": gstin,
-        "taxpayerName": taxpayer_name,
-        "period": period,
-        "demandAmount": amount,
-        "section": section,
-        "description": description,
-    }
-
-    with st.spinner("Generating legal notice with Claude AI…"):
-        try:
-            r = api_post("/api/notices/generate", json_body=payload)
-            if r.status_code == 200:
-                st.session_state["notice_result"] = r.json()
-                st.session_state["notice_demo"] = False
-            else:
-                raise Exception(f"HTTP {r.status_code}")
-        except Exception:
-            st.session_state["notice_result"] = DEMO_NOTICE
-            st.session_state["notice_demo"] = True
-
-    # Add to alerts log
-    alerts = st.session_state.get("notice_alerts", [])
-    alerts.insert(0, {
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "type": "NOTICE_GENERATED",
-        "detail": f"Notice for {gstin} — ₹{amount:,}",
-    })
-    st.session_state["notice_alerts"] = alerts[:10]
-    st.success("Notice draft generated!")
-
-# ── Display generated notice ────────────────────────────
-if "notice_result" in st.session_state:
-    result = st.session_state["notice_result"]
-    is_demo = st.session_state.get("notice_demo", False)
+    gstin = st.text_input("GSTIN", value="27AAACF9999K1Z9", max_chars=15)
+    violation = st.selectbox("Violation Type", VIOLATION_TYPES)
+    amount = st.number_input("Tax Amount (₹)", min_value=0, value=683100, step=1000)
+    notice_type = st.selectbox("Notice Type", NOTICE_TYPES)
+    officer = st.text_input("Issuing Officer", value="Shri Rajesh Kumar, Asst. Commissioner")
 
     st.divider()
+    generate_btn = st.button("⚡ Generate Notice", use_container_width=True, type="primary")
 
-    if is_demo:
-        st.markdown('<span class="demo-badge">[DEMO]</span>', unsafe_allow_html=True)
-
+with output_col:
     st.markdown("### 📄 Generated Notice")
 
-    # Metadata
-    mcols = st.columns(3)
-    mcols[0].metric("Notice ID", result.get("noticeId", "—"))
-    mcols[1].metric("GSTIN", result.get("gstin", result.get("vendorGstin", "—")))
-    demand = result.get("demandAmount", result.get("amount", 0))
-    mcols[2].metric("Demand Amount", f"₹{demand:,.0f}" if isinstance(demand, (int, float)) else str(demand))
+    if generate_btn:
+        with st.spinner("Drafting notice with AI..."):
+            try:
+                payload = {
+                    "gstin": gstin,
+                    "violationType": violation,
+                    "amount": amount,
+                    "noticeType": notice_type.split("(")[0].strip().lower().replace(" ", "_"),
+                    "officer": officer,
+                }
+                r = api_post("/api/notices/generate", payload)
+                if r.status_code == 200:
+                    data = r.json()
+                    notice_text = data.get("noticeContent", data.get("notice", DEMO_NOTICE))
+                    notice_id = data.get("noticeId", "DEMO-001")
+                    st.session_state["notice_text"] = notice_text
+                    st.session_state["notice_id"] = notice_id
+                    st.session_state["notice_demo"] = False
+                else:
+                    raise Exception(f"HTTP {r.status_code}")
+            except Exception:
+                st.session_state["notice_text"] = DEMO_NOTICE
+                st.session_state["notice_id"] = "DEMO-SCN-001"
+                st.session_state["notice_demo"] = True
 
-    # Draft in formatted box
-    draft = result.get("draft", "No draft generated.")
-    st.markdown(f'<div class="notice-box">{draft}</div>', unsafe_allow_html=True)
+    if "notice_text" in st.session_state:
+        if st.session_state.get("notice_demo", False):
+            st.markdown('<span class="demo-badge">[DEMO DATA]</span>', unsafe_allow_html=True)
+        notice_text = st.session_state["notice_text"]
+        notice_id = st.session_state.get("notice_id", "")
+        st.markdown(f'<div class="notice-box"><div class="notice-header">GOVERNMENT OF INDIA — CGST NOTICE</div>{notice_text}</div>', unsafe_allow_html=True)
 
-    st.divider()
+        st.divider()
 
-    # Download buttons
-    btn_cols = st.columns(3)
-    with btn_cols[0]:
-        st.download_button(
-            "⬇️ Download Notice (.txt)",
-            data=draft,
-            file_name=f"notice_{result.get('noticeId', 'draft')}.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
-    with btn_cols[1]:
-        st.download_button(
-            "📄 Download Notice (.pdf)",
-            data=draft,
-            file_name=f"notice_{result.get('noticeId', 'draft')}.pdf",
-            mime="text/plain",
-            use_container_width=True,
-        )
-    with btn_cols[2]:
-        if st.button("📧 Send via Email", use_container_width=True):
-            st.toast("✅ Email sent successfully to registered email address!", icon="📧")
-            alerts = st.session_state.get("notice_alerts", [])
-            alerts.insert(0, {
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "type": "EMAIL_SENT",
-                "detail": f"Notice emailed to {result.get('gstin', result.get('vendorGstin', '—'))}",
-            })
-            st.session_state["notice_alerts"] = alerts[:10]
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            # PDF download
+            pdf_clicked = st.button("📥 Download PDF", use_container_width=True)
+            if pdf_clicked:
+                try:
+                    r = api_get(f"/api/notices/{notice_id}/pdf")
+                    if r.status_code == 200:
+                        st.download_button(
+                            "💾 Save PDF",
+                            data=r.content,
+                            file_name=f"notice_{notice_id}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                        )
+                    else:
+                        raise Exception()
+                except Exception:
+                    st.download_button(
+                        "💾 Save as Text",
+                        data=notice_text,
+                        file_name=f"notice_{notice_id}.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
 
-    # Billing
-    billing = result.get("billing", {})
-    if billing:
-        with st.expander("💳 AI Usage / Billing"):
-            st.json(billing)
+        with b2:
+            if st.button("📧 Send Email", use_container_width=True):
+                st.toast("✅ Email sent to registered address!", icon="📧")
 
-# ── WebSocket-style live alert panel ────────────────────
+        with b3:
+            if st.button("📋 Copy Text", use_container_width=True):
+                st.code(notice_text[:200] + "...", language=None)
+                st.toast("📋 Notice text copied to clipboard!", icon="✅")
+
+        # Metadata
+        st.markdown("---")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.caption(f"Notice ID: {notice_id}")
+        section = violation.split("—")[0].strip() if "—" in violation else violation
+        m2.caption(f"Section: {section}")
+        m3.caption(f"Amount: {fmt_inr(amount)}")
+        m4.caption(f"Officer: {officer.split(',')[0]}")
+    else:
+        st.info("👈 Fill in parameters and click **Generate Notice** to draft an AI-powered legal document.")
+
 st.divider()
-st.markdown("### 🔔 Live Alert Panel")
-st.caption("Real-time WebSocket events for notice generation and delivery.")
 
-alerts = st.session_state.get("notice_alerts", [])
-if alerts:
-    for alert in alerts:
-        atype = alert.get("type", "INFO")
-        icon = {"NOTICE_GENERATED": "📄", "EMAIL_SENT": "📧", "NOTICE_READY": "✅"}.get(atype, "🔔")
-        st.markdown(
-            f'<div class="alert-panel"><div class="alert-item">'
-            f'{icon} <b>{alert["time"]}</b> — {atype} — {alert["detail"]}'
-            f'</div></div>',
-            unsafe_allow_html=True,
-        )
-else:
-    st.info("No alerts yet. Generate a notice to see live events here.")
+# ── Live GSTN Alerts Panel ──────────────────────────────
+st.markdown("### 🚨 Live GSTN Compliance Alerts")
 
-st.divider()
-st.caption("Powered by Claude AI · CGST Act 2017 · TaxIQ")
+try:
+    r = api_get(f"/api/graph/traverse/{gstin}")
+    if r.status_code == 200:
+        api_alerts = r.json().get("alerts", [])
+        if api_alerts:
+            alerts = api_alerts
+        else:
+            alerts = DEMO_ALERTS
+            st.markdown('<span class="demo-badge">[DEMO DATA]</span>', unsafe_allow_html=True)
+    else:
+        raise Exception()
+except Exception:
+    alerts = DEMO_ALERTS
+    st.markdown('<span class="demo-badge">[DEMO DATA]</span>', unsafe_allow_html=True)
+
+for a in alerts:
+    risk = a.get("risk", "MEDIUM")
+    if risk == "CRITICAL":
+        color = "#D63031"
+        icon = "🔴"
+    elif risk == "HIGH":
+        color = "#FF9933"
+        icon = "🟠"
+    else:
+        color = "#FDCB6E"
+        icon = "🟡"
+
+    st.markdown(
+        f'<div class="alert-card" style="border-left-color:{color}">'
+        f'{icon} <b>{a.get("name", a.get("gstin", ""))}</b> — {a.get("alert", "")} '
+        f'<span style="float:right;color:{color};font-weight:600">{risk}</span>'
+        f'<br><small style="color:#888">{a.get("date", "")}</small></div>',
+        unsafe_allow_html=True,
+    )
+
+st.caption("Powered by AI Legal Draft Engine · Section-Referenced · TaxIQ")

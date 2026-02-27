@@ -48,29 +48,76 @@ class FraudDetector:
         return rings
 
     async def detect_shell_companies(self) -> List[Dict[str, Any]]:
-        """Identify potential shell companies using risk scores and graph topology."""
+        """
+        Shell company = GSTIN with >10 buyers but <2 suppliers
+        AND registered <180 days ago.
+        Falls back to risk score heuristic when graph data is sparse.
+        """
         await calculate_risk_scores()
         summary = await get_risk_summary()
 
         shells: List[Dict[str, Any]] = []
+        g = graph_store.nx_graph
+
+        # Pass 1: topology-based detection
+        for node in g.nodes():
+            # Count buyers (nodes that claim ITC FROM this node)
+            buyers = sum(1 for _, _, a in g.in_edges(node, data=True)
+                         if a.get("type") == "CLAIMED_ITC_FROM")
+            # Count suppliers (nodes this node claims ITC FROM)
+            suppliers = sum(1 for _, _, a in g.out_edges(node, data=True)
+                            if a.get("type") == "CLAIMED_ITC_FROM")
+
+            node_data = g.nodes[node]
+            reg_date_str = node_data.get("registration_date", "")
+            days_since_reg = 999
+            if reg_date_str:
+                try:
+                    from datetime import datetime as dt
+                    reg_date = dt.strptime(reg_date_str, "%Y-%m-%d")
+                    days_since_reg = (dt.utcnow() - reg_date).days
+                except (ValueError, TypeError):
+                    pass
+
+            reasons = []
+            is_shell = False
+
+            if buyers > 10 and suppliers < 2:
+                reasons.append(f"{buyers} buyers but only {suppliers} suppliers — classic pass-through")
+                is_shell = True
+            if days_since_reg < 180:
+                reasons.append(f"Registered only {days_since_reg} days ago")
+                is_shell = True
+            if buyers > 5 and suppliers == 0:
+                reasons.append(f"{buyers} outward ITC claims with zero inward invoices")
+                is_shell = True
+
+            if is_shell:
+                shells.append({
+                    "gstin": node,
+                    "name": node_data.get("name", node),
+                    "riskScore": min(0.95, 0.7 + buyers * 0.02),
+                    "buyers": buyers,
+                    "suppliers": suppliers,
+                    "daysSinceRegistration": days_since_reg,
+                    "reason": "; ".join(reasons),
+                    "detectedOn": datetime.utcnow().isoformat() + "Z",
+                })
+
+        # Pass 2: risk-score fallback for nodes not caught by topology
+        seen = {s["gstin"] for s in shells}
         for entry in summary.get("top10", []):
             risk = entry.get("risk_score", 0)
-            if risk < 0.7:
+            gstin = entry.get("gstin", "")
+            if risk < 0.7 or gstin in seen:
                 continue
 
-            # Determine reason from graph topology
-            gstin = entry.get("gstin", "")
             reasons = []
-            g = graph_store.nx_graph
             if gstin in g:
-                out_itc = sum(
-                    1 for _, _, a in g.out_edges(gstin, data=True)
-                    if a.get("type") == "CLAIMED_ITC_FROM"
-                )
-                in_itc = sum(
-                    1 for _, _, a in g.in_edges(gstin, data=True)
-                    if a.get("type") == "CLAIMED_ITC_FROM"
-                )
+                out_itc = sum(1 for _, _, a in g.out_edges(gstin, data=True)
+                              if a.get("type") == "CLAIMED_ITC_FROM")
+                in_itc = sum(1 for _, _, a in g.in_edges(gstin, data=True)
+                             if a.get("type") == "CLAIMED_ITC_FROM")
                 if out_itc > 3 and in_itc == 0:
                     reasons.append("High outward ITC claims with zero inward invoices")
                 if out_itc > 5:

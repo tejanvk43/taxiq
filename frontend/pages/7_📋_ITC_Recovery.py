@@ -1,311 +1,230 @@
 """
-TaxIQ — 📋 ITC Recovery Pipeline
-Kanban board tracking Input Tax Credit at risk, in progress, and recovered.
+TaxIQ — 📋 ITC Recovery Tracker
+Kanban pipeline: At Risk → In Progress → Recovered
+Funnel chart · Trend line · Actionable cards.
 """
-
 import os
-import json
-from datetime import datetime, timedelta
-import random
 
 import httpx
+import plotly.graph_objects as go
 import streamlit as st
 
 st.set_page_config(page_title="TaxIQ | ITC Recovery", page_icon="📋", layout="wide")
 
 BACKEND = os.getenv("TAXIQ_BACKEND_URL", "http://localhost:8000")
 
-# ── CSS ─────────────────────────────────────────────────
-st.markdown("""
-<style>
-section.main { background-color: #0A1628; }
-div[data-testid="stAppViewContainer"] { background-color: #0A1628; }
-.demo-badge {
-  display:inline-block; padding:2px 8px; border-radius:999px;
-  border:1px solid rgba(255,153,51,.55);
-  background: rgba(255,153,51,.10);
-  color: #FF9933; font-size: 12px; margin-left: 8px;
-}
-.kanban-header {
-  font-size: 16px; font-weight: 700; padding: 6px 12px;
-  border-radius: 6px; margin-bottom: 10px; text-align: center;
-}
-.kanban-risk   { background: rgba(239,68,68,.15); color: #EF4444; border: 1px solid rgba(239,68,68,.35); }
-.kanban-prog   { background: rgba(245,158,11,.15); color: #F59E0B; border: 1px solid rgba(245,158,11,.35); }
-.kanban-done   { background: rgba(34,197,94,.15);  color: #22C55E; border: 1px solid rgba(34,197,94,.35); }
-
-.kanban-card {
-  background: #0E1F3E; border: 1px solid #1A3A5C; border-radius: 8px;
-  padding: 14px; margin-bottom: 10px; position: relative;
-}
-.kanban-card:hover { border-color: #FF9933; }
-.card-gstin   { font-size: 13px; color: #94A3B8; margin-bottom: 4px; }
-.card-vendor  { font-size: 15px; font-weight: 600; color: #E0E0E0; }
-.card-amount  { font-size: 18px; font-weight: 700; color: #FF9933; margin: 6px 0; }
-.card-days    { font-size: 12px; color: #94A3B8; }
-.drag-hint    { font-size: 11px; color: #475569; text-align: center; margin-top: 4px; }
-</style>
-""", unsafe_allow_html=True)
+# ── Design System CSS ───────────────────────────────────
+st.markdown("""<style>
+    .stApp { background-color: #0A1628; color: #F8F9FA; }
+    .stMetric { background: #0D1F3C; border-radius: 12px;
+                padding: 16px; border-left: 4px solid #FF9933; }
+    .stButton>button { background: #FF9933; color: #0A1628;
+                       font-weight: 700; border-radius: 8px;
+                       border: none; }
+    div[data-testid="metric-container"] {
+      background: #0D1F3C; border-radius: 10px; padding: 10px; }
+    .demo-badge {
+      display:inline-block; padding:2px 10px; border-radius:999px;
+      background:rgba(253,203,110,.15); border:1px solid #FDCB6E;
+      color:#FDCB6E; font-size:12px; font-weight:600; }
+    .kanban-header-risk    { background:#D63031; color:#FFF; padding:6px 14px;
+                             border-radius:8px 8px 0 0; font-weight:700; }
+    .kanban-header-prog    { background:#FDCB6E; color:#0A1628; padding:6px 14px;
+                             border-radius:8px 8px 0 0; font-weight:700; }
+    .kanban-header-done    { background:#00B894; color:#0A1628; padding:6px 14px;
+                             border-radius:8px 8px 0 0; font-weight:700; }
+    .kanban-card {
+      background:#0D1F3C; border:1px solid #1E3A5F; border-radius:0 0 8px 8px;
+      padding:12px; margin-bottom:8px; }
+</style>""", unsafe_allow_html=True)
 
 
-def inr(v):
-    """Format a number in Indian style (₹X,XX,XXX)."""
-    s = f"{int(abs(v)):,}"
-    parts = s.split(",")
-    if len(parts) <= 1:
-        formatted = s
-    else:
-        last = parts[-1]
-        rest = ",".join(parts[:-1])
-        # Re-group rest in 2-digit segments (Indian numbering)
-        rest_digits = rest.replace(",", "")
-        groups = []
-        while len(rest_digits) > 2:
-            groups.insert(0, rest_digits[-2:])
-            rest_digits = rest_digits[:-2]
-        if rest_digits:
-            groups.insert(0, rest_digits)
-        formatted = ",".join(groups) + "," + last
-    return f"₹{formatted}"
+def fmt_inr(n):
+    if n >= 1e7:  return f"₹{n/1e7:.1f}Cr"
+    if n >= 1e5:  return f"₹{n/1e5:.1f}L"
+    return f"₹{n:,.0f}"
 
 
-def api_get(path, params=None):
+def api_get(path):
     with httpx.Client(timeout=30) as c:
-        return c.get(f"{BACKEND}{path}", params=params)
+        return c.get(f"{BACKEND}{path}")
 
 
-# ── Demo data ───────────────────────────────────────────
-def demo_pipeline():
-    return {
-        "gstin": "27AADCB2230M1ZT",
-        "columns": [
-            {
-                "id": "at_risk",
-                "title": "🔴 At Risk",
-                "cards": [
-                    {"id": "ITC-001", "vendor": "M/s Rathi Steel Corp",
-                     "gstin": "27AAECR4512K1ZM",
-                     "amount": 185000, "days": 45,
-                     "action": "Send Reminder"},
-                    {"id": "ITC-002", "vendor": "M/s Patel Chemicals",
-                     "gstin": "24ABCPD6789Q1ZN",
-                     "amount": 95000, "days": 62,
-                     "action": "Escalate"},
-                    {"id": "ITC-003", "vendor": "M/s Gupta Textiles",
-                     "gstin": "09AAFCG1234L1ZP",
-                     "amount": 210000, "days": 30,
-                     "action": "Verify Invoice"},
-                ],
-            },
-            {
-                "id": "in_progress",
-                "title": "🟡 In Progress",
-                "cards": [
-                    {"id": "ITC-004", "vendor": "M/s Sharma Electronics",
-                     "gstin": "07ABCPS5678M1ZR",
-                     "amount": 120000, "days": 18,
-                     "action": "Follow Up"},
-                    {"id": "ITC-005", "vendor": "M/s Reddy Motors",
-                     "gstin": "36AADCR9876P1ZS",
-                     "amount": 75000, "days": 10,
-                     "action": "Confirm Payment"},
-                ],
-            },
-            {
-                "id": "recovered",
-                "title": "🟢 Recovered",
-                "cards": [
-                    {"id": "ITC-006", "vendor": "M/s Kumar Traders",
-                     "gstin": "33ABDCK3456N1ZT",
-                     "amount": 145000, "days": 0,
-                     "action": "Completed"},
-                    {"id": "ITC-007", "vendor": "M/s Singh Logistics",
-                     "gstin": "06AACS7890R1ZU",
-                     "amount": 88000, "days": 0,
-                     "action": "Completed"},
-                    {"id": "ITC-008", "vendor": "M/s Joshi Packaging",
-                     "gstin": "29AABCJ2345S1ZV",
-                     "amount": 62000, "days": 0,
-                     "action": "Completed"},
-                    {"id": "ITC-009", "vendor": "M/s Deshmukh Foods",
-                     "gstin": "27AAEPD4567T1ZW",
-                     "amount": 55000, "days": 0,
-                     "action": "Completed"},
-                ],
-            },
-        ],
-    }
+# ── DEMO DATA ──────────────────────────────────────────
+DEMO_PIPELINE = {
+    "at_risk": [
+        {"gstin": "19AABCG1234Q1Z2", "name": "GoldStar Traders", "amount": 450000, "days_pending": 12, "mismatch_type": "Invoice Missing in GSTR-2B"},
+        {"gstin": "07AABCS7777H1Z1", "name": "Shadow Supplies", "amount": 280000, "days_pending": 5, "mismatch_type": "Taxable Value Mismatch"},
+        {"gstin": "33ABDCK3456N1ZT", "name": "Kumar Traders", "amount": 120000, "days_pending": 28, "mismatch_type": "GSTIN Mismatch"},
+    ],
+    "in_progress": [
+        {"gstin": "24ABCPD6789Q1ZN", "name": "Patel Chemicals", "amount": 360000, "days_pending": 45, "mismatch_type": "Tax Rate Mismatch", "notice_sent": True},
+        {"gstin": "27AABCR5678P1Z4", "name": "Rajesh Exports", "amount": 175000, "days_pending": 60, "mismatch_type": "Invoice Missing in GSTR-2B", "notice_sent": True},
+    ],
+    "recovered": [
+        {"gstin": "29AAACN0001A1Z5", "name": "Nexus Manufacturing", "amount": 520000, "days_pending": 0, "mismatch_type": "Taxable Value Mismatch", "recovered_date": "2025-01-10"},
+        {"gstin": "27AAACF9999K1Z9", "name": "Falcon Components", "amount": 310000, "days_pending": 0, "mismatch_type": "Tax Rate Mismatch", "recovered_date": "2024-12-28"},
+        {"gstin": "36AABCT4321M1Z8", "name": "Telangana Steel", "amount": 195000, "days_pending": 0, "mismatch_type": "GSTIN Mismatch", "recovered_date": "2024-12-15"},
+    ],
+}
 
+DEMO_TREND = [
+    {"month": "Aug '24", "recovered": 120000, "at_risk": 800000},
+    {"month": "Sep '24", "recovered": 250000, "at_risk": 720000},
+    {"month": "Oct '24", "recovered": 410000, "at_risk": 650000},
+    {"month": "Nov '24", "recovered": 680000, "at_risk": 500000},
+    {"month": "Dec '24", "recovered": 830000, "at_risk": 420000},
+    {"month": "Jan '25", "recovered": 1025000, "at_risk": 350000},
+]
 
 # ── Header ──────────────────────────────────────────────
-st.markdown("## 📋 ITC Recovery Pipeline")
-st.caption("Track Input Tax Credit claims from at-risk through recovery. Kanban-style pipeline view.")
+st.title("📋 ITC Recovery Tracker")
+st.caption("From mismatch → notice → vendor response → recovery. Track every rupee.")
 
-st.divider()
-
-# ── Load pipeline data ──────────────────────────────────
-if st.button("🔄 Load Recovery Pipeline", use_container_width=True, type="primary"):
-    with st.spinner("Fetching ITC pipeline from backend…"):
-        try:
-            r = api_get("/api/recovery/pipeline")
-            if r.status_code == 200:
-                st.session_state["itc_pipeline"] = r.json()
-                st.session_state["itc_demo"] = False
-            else:
-                raise Exception(f"HTTP {r.status_code}")
-        except Exception:
-            st.session_state["itc_pipeline"] = demo_pipeline()
-            st.session_state["itc_demo"] = True
-
-# Default demo data
-if "itc_pipeline" not in st.session_state:
-    st.session_state["itc_pipeline"] = demo_pipeline()
-    st.session_state["itc_demo"] = True
-
-pipeline = st.session_state["itc_pipeline"]
-is_demo = st.session_state.get("itc_demo", False)
+# ── Load pipeline ───────────────────────────────────────
+try:
+    r = api_get("/api/recovery/pipeline")
+    if r.status_code == 200:
+        pipeline = r.json()
+        is_demo = False
+    else:
+        raise Exception()
+except Exception:
+    pipeline = DEMO_PIPELINE
+    is_demo = True
 
 if is_demo:
-    st.markdown('<span class="demo-badge">[DEMO]</span>', unsafe_allow_html=True)
+    st.markdown('<span class="demo-badge">[DEMO DATA]</span>', unsafe_allow_html=True)
 
-# ── Compute summary metrics ────────────────────────────
-cols_data = pipeline.get("columns", [])
-col_map = {}
-for col in cols_data:
-    cid = col.get("id", "")
-    cards = col.get("cards", [])
-    total = sum(c.get("amount", 0) for c in cards)
-    col_map[cid] = {"total": total, "count": len(cards), "cards": cards, "title": col.get("title", "")}
-
-at_risk_amt = col_map.get("at_risk", {}).get("total", 0)
-in_progress_amt = col_map.get("in_progress", {}).get("total", 0)
-recovered_amt = col_map.get("recovered", {}).get("total", 0)
-total_itc = at_risk_amt + in_progress_amt + recovered_amt
-recovery_rate = (recovered_amt / total_itc * 100) if total_itc > 0 else 0
-
-# ── Summary metrics row ────────────────────────────────
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Total ITC Tracked", inr(total_itc))
-m2.metric("🔴 At Risk", inr(at_risk_amt))
-m3.metric("🟢 Recovered", inr(recovered_amt))
-m4.metric("Recovery Rate", f"{recovery_rate:.1f}%")
+at_risk = pipeline.get("at_risk", [])
+in_prog = pipeline.get("in_progress", [])
+recovered = pipeline.get("recovered", [])
 
 st.divider()
 
-# ── Kanban board ────────────────────────────────────────
-st.markdown("### Kanban Board")
+# ── Top Metrics ─────────────────────────────────────────
+total_risk = sum(c["amount"] for c in at_risk)
+total_prog = sum(c["amount"] for c in in_prog)
+total_rec  = sum(c["amount"] for c in recovered)
+total_all  = total_risk + total_prog + total_rec
+rate = (total_rec / total_all * 100) if total_all else 0
+prev_rate = rate - 4.2  # simulated trend
 
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Total ITC At Risk", fmt_inr(total_risk + total_prog))
+m2.metric("In Progress", fmt_inr(total_prog), delta=f"{len(in_prog)} cases")
+m3.metric("Recovered", fmt_inr(total_rec), delta=f"+{fmt_inr(total_rec)}")
+m4.metric("Recovery Rate", f"{rate:.1f}%", delta=f"↑{rate - prev_rate:.1f}%")
+
+st.divider()
+
+# ── Kanban Board ────────────────────────────────────────
+st.markdown("### Pipeline Board")
 k1, k2, k3 = st.columns(3)
 
-def render_kanban_column(container, col_id, css_class):
-    data = col_map.get(col_id, {"total": 0, "count": 0, "cards": [], "title": col_id})
-    with container:
-        st.markdown(f'<div class="kanban-header {css_class}">{data["title"]}  ({data["count"]})</div>',
-                     unsafe_allow_html=True)
-        st.markdown(f'<div style="text-align:center;font-size:13px;color:#94A3B8;margin-bottom:8px;">'
-                     f'Total: {inr(data["total"])}</div>', unsafe_allow_html=True)
+with k1:
+    st.markdown(f'<div class="kanban-header-risk">🔴 AT RISK — {len(at_risk)} cases · {fmt_inr(total_risk)}</div>', unsafe_allow_html=True)
+    for c in at_risk:
+        with st.container():
+            st.markdown(f"**{c['name']}**")
+            st.caption(f"GSTIN: {c['gstin']}")
+            st.markdown(f"💰 {fmt_inr(c['amount'])} · 📋 {c.get('mismatch_type', 'Unknown')}")
+            days = c.get("days_pending", 0)
+            st.progress(min(days / 90, 1.0), text=f"{days}/90 days pending")
+            if st.button("📨 Send Notice", key=f"send_{c['gstin']}", use_container_width=True):
+                st.toast(f"📨 Notice sent to {c['name']}!", icon="✅")
 
-        for card in data["cards"]:
-            st.markdown(f"""
-            <div class="kanban-card">
-                <div class="card-gstin">{card.get("gstin", "—")}</div>
-                <div class="card-vendor">{card.get("vendor", "Unknown")}</div>
-                <div class="card-amount">{inr(card.get("amount", 0))}</div>
-                <div class="card-days">{'✅ Settled' if card.get("days", 0) == 0 else f'⏳ {card["days"]} days pending'}</div>
-            </div>""", unsafe_allow_html=True)
+with k2:
+    st.markdown(f'<div class="kanban-header-prog">🟡 IN PROGRESS — {len(in_prog)} cases · {fmt_inr(total_prog)}</div>', unsafe_allow_html=True)
+    for c in in_prog:
+        with st.container():
+            st.markdown(f"**{c['name']}**")
+            st.caption(f"GSTIN: {c['gstin']}")
+            st.markdown(f"💰 {fmt_inr(c['amount'])} · 📋 {c.get('mismatch_type', 'Unknown')}")
+            days = c.get("days_pending", 0)
+            st.progress(min(days / 90, 1.0), text=f"{days}/90 days pending")
+            if st.button("📞 Follow Up", key=f"follow_{c['gstin']}", use_container_width=True):
+                st.toast(f"📞 Follow-up reminder set for {c['name']}!", icon="🔔")
 
-            if card.get("action") and card["action"] != "Completed":
-                if st.button(f"⚡ {card['action']}", key=f"btn_{card['id']}",
-                             use_container_width=True):
-                    st.toast(f"Action '{card['action']}' triggered for {card.get('vendor', card['id'])}!", icon="⚡")
-
-        st.markdown('<div class="drag-hint">↕ Drag to reorder (visual hint)</div>',
-                     unsafe_allow_html=True)
-
-
-render_kanban_column(k1, "at_risk", "kanban-risk")
-render_kanban_column(k2, "in_progress", "kanban-prog")
-render_kanban_column(k3, "recovered", "kanban-done")
+with k3:
+    st.markdown(f'<div class="kanban-header-done">🟢 RECOVERED — {len(recovered)} cases · {fmt_inr(total_rec)}</div>', unsafe_allow_html=True)
+    for c in recovered:
+        with st.container():
+            st.markdown(f"**{c['name']}**")
+            st.caption(f"GSTIN: {c['gstin']}")
+            st.markdown(f"💰 {fmt_inr(c['amount'])} · ✅ Recovered {c.get('recovered_date', '')}")
+            st.progress(1.0, text="Complete")
+            if st.button("🗂 Close Case", key=f"close_{c['gstin']}", use_container_width=True):
+                st.toast(f"🗂 Case closed for {c['name']}", icon="✅")
 
 st.divider()
 
-# ── Funnel chart ────────────────────────────────────────
+# ── Funnel Chart ────────────────────────────────────────
 st.markdown("### Recovery Funnel")
 
-try:
-    import plotly.graph_objects as go
+funnel_stages = ["Identified", "Notice Sent", "Response Received", "Partially Resolved", "Fully Recovered"]
+funnel_values = [
+    len(at_risk) + len(in_prog) + len(recovered),
+    len(in_prog) + len(recovered),
+    len(in_prog) + len(recovered) - 1,
+    len(recovered) + 1,
+    len(recovered),
+]
+funnel_colors = ["#D63031", "#FF9933", "#FDCB6E", "#00B894", "#00B894"]
 
-    labels = ["🔴 At Risk", "🟡 In Progress", "🟢 Recovered"]
-    values = [at_risk_amt, in_progress_amt, recovered_amt]
-    colors = ["#EF4444", "#F59E0B", "#22C55E"]
-
-    fig = go.Figure(go.Funnel(
-        y=labels,
-        x=values,
-        textinfo="value+percent initial",
-        texttemplate="%{value:,.0f}<br>%{percentInitial:.1%}",
-        marker=dict(color=colors),
-    ))
-    fig.update_layout(
-        paper_bgcolor="#0A1628",
-        plot_bgcolor="#0A1628",
-        font=dict(color="#E0E0E0"),
-        height=340,
-        margin=dict(l=20, r=20, t=10, b=10),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-except ImportError:
-    st.warning("Plotly not installed. Showing text summary instead.")
-    st.write(f"At Risk: {inr(at_risk_amt)} | In Progress: {inr(in_progress_amt)} | Recovered: {inr(recovered_amt)}")
-
-# ── Recovery timeline ───────────────────────────────────
-st.divider()
-st.markdown("### 📈 Recovery Trend (Last 6 Months)")
-
-try:
-    import plotly.graph_objects as go
-
-    months = []
-    now = datetime.now()
-    for i in range(5, -1, -1):
-        d = now - timedelta(days=30 * i)
-        months.append(d.strftime("%b '%y"))
-
-    # Simulated cumulative data for demo
-    random.seed(42)
-    cum_recovered = [0] * 6
-    base = 50000
-    for i in range(6):
-        base += random.randint(30000, 100000)
-        cum_recovered[i] = base
-
-    cum_risk = [total_itc - r for r in cum_recovered]
-    cum_risk = [max(0, r) for r in cum_risk]
-
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(
-        x=months, y=cum_risk, name="ITC at Risk",
-        fill="tozeroy", fillcolor="rgba(239,68,68,.15)",
-        line=dict(color="#EF4444", width=2),
-    ))
-    fig2.add_trace(go.Scatter(
-        x=months, y=cum_recovered, name="Recovered",
-        fill="tozeroy", fillcolor="rgba(34,197,94,.15)",
-        line=dict(color="#22C55E", width=2),
-    ))
-    fig2.update_layout(
-        paper_bgcolor="#0A1628",
-        plot_bgcolor="#0A1628",
-        font=dict(color="#E0E0E0"),
-        xaxis=dict(gridcolor="#1A2E50"),
-        yaxis=dict(gridcolor="#1A2E50", tickprefix="₹"),
-        legend=dict(x=0, y=1.1, orientation="h"),
-        height=320,
-        margin=dict(l=20, r=20, t=10, b=10),
-    )
-    st.plotly_chart(fig2, use_container_width=True)
-except ImportError:
-    pass
+fig_funnel = go.Figure(go.Funnel(
+    y=funnel_stages,
+    x=funnel_values,
+    marker=dict(color=funnel_colors),
+    textinfo="value+percent initial",
+    textfont=dict(color="#F8F9FA"),
+))
+fig_funnel.update_layout(
+    template="plotly_dark",
+    paper_bgcolor="#0A1628",
+    plot_bgcolor="#0D1F3C",
+    font_color="#F8F9FA",
+    height=320,
+    margin=dict(l=20, r=20, t=20, b=20),
+)
+st.plotly_chart(fig_funnel, use_container_width=True)
 
 st.divider()
-st.caption("Powered by GSTN Reconciliation Engine · TaxIQ")
+
+# ── Recovery Trend ──────────────────────────────────────
+st.markdown("### Recovery Trend (6 Months)")
+
+trend = DEMO_TREND
+months = [t["month"] for t in trend]
+
+fig_trend = go.Figure()
+fig_trend.add_trace(go.Scatter(
+    x=months,
+    y=[t["at_risk"] for t in trend],
+    name="At Risk",
+    mode="lines+markers",
+    line=dict(color="#D63031", width=3),
+    marker=dict(size=8),
+    fill="tonexty" if False else None,
+))
+fig_trend.add_trace(go.Scatter(
+    x=months,
+    y=[t["recovered"] for t in trend],
+    name="Recovered",
+    mode="lines+markers",
+    line=dict(color="#00B894", width=3),
+    marker=dict(size=8),
+))
+fig_trend.update_layout(
+    template="plotly_dark",
+    paper_bgcolor="#0A1628",
+    plot_bgcolor="#0D1F3C",
+    font_color="#F8F9FA",
+    height=300,
+    margin=dict(l=10, r=10, t=10, b=10),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    yaxis_title="Amount (₹)",
+)
+st.plotly_chart(fig_trend, use_container_width=True)
+
+st.caption("Powered by ITC Recovery Engine · Real-time Pipeline · TaxIQ")

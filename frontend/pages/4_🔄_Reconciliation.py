@@ -1,57 +1,44 @@
 """
-TaxIQ — 🔄 GSTR-1 vs GSTR-2B Reconciliation
-Full reconciliation page with summary metrics, mismatch table,
-expandable audit trails, bar chart by type, and PDF download.
+TaxIQ — 🔄 GSTR Reconciliation Engine
+Compare GSTR-1 (supplier filed) vs GSTR-2B (buyer sees) — catch mismatches before filing.
 """
-
-import io
-import os
 import json
-from datetime import datetime
+import os
 
 import httpx
-import streamlit as st
 import plotly.graph_objects as go
-import pandas as pd
+import streamlit as st
 
 st.set_page_config(page_title="TaxIQ | Reconciliation", page_icon="🔄", layout="wide")
 
 BACKEND = os.getenv("TAXIQ_BACKEND_URL", "http://localhost:8000")
 
-# ── Dark theme CSS ──────────────────────────────────────
-st.markdown("""
-<style>
-section.main { background-color: #0A1628; }
-div[data-testid="stAppViewContainer"] { background-color: #0A1628; }
-.demo-badge {
-  display:inline-block; padding:2px 8px; border-radius:999px;
-  border:1px solid rgba(255,153,51,.55);
-  background: rgba(255,153,51,.10);
-  color: #FF9933; font-size: 12px; margin-left: 8px;
-}
-</style>
-""", unsafe_allow_html=True)
+# ── Design System CSS ───────────────────────────────────
+st.markdown("""<style>
+    .stApp { background-color: #0A1628; color: #F8F9FA; }
+    .stMetric { background: #0D1F3C; border-radius: 12px;
+                padding: 16px; border-left: 4px solid #FF9933; }
+    .stButton>button { background: #FF9933; color: #0A1628;
+                       font-weight: 700; border-radius: 8px;
+                       border: none; }
+    .stDataFrame { background: #0D1F3C; }
+    div[data-testid="metric-container"] {
+      background: #0D1F3C; border-radius: 10px; padding: 10px; }
+    .demo-badge {
+      display:inline-block; padding:2px 10px; border-radius:999px;
+      background:rgba(253,203,110,.15); border:1px solid #FDCB6E;
+      color:#FDCB6E; font-size:12px; font-weight:600; }
+</style>""", unsafe_allow_html=True)
 
-# ── Helpers ─────────────────────────────────────────────
-def inr(x) -> str:
-    try:
-        n = int(round(float(x)))
-    except Exception:
-        return f"₹{x}"
-    s = str(abs(n))
-    if len(s) <= 3:
-        out = s
-    else:
-        out = s[-3:]
-        s = s[:-3]
-        while s:
-            out = s[-2:] + "," + out
-            s = s[:-2]
-    return ("-₹" if n < 0 else "₹") + out
+
+def fmt_inr(n):
+    if n >= 1e7: return f"₹{n/1e7:.1f}Cr"
+    if n >= 1e5: return f"₹{n/1e5:.1f}L"
+    return f"₹{n:,.0f}"
 
 
 def api_post(path, json_body=None):
-    with httpx.Client(timeout=60) as c:
+    with httpx.Client(timeout=90) as c:
         return c.post(f"{BACKEND}{path}", json=json_body)
 
 
@@ -60,68 +47,86 @@ def api_get(path):
         return c.get(f"{BACKEND}{path}")
 
 
-RISK_BADGE = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴", "CRITICAL": "🔴"}
-TYPE_LABEL = {
-    "MISSING_GSTR1": "Missing in GSTR-1",
-    "MISMATCH_AMOUNT": "Amount Mismatch",
-    "ITC_NOT_REFLECTED": "ITC Not Reflected",
-    "ITC_EXCESS": "Tax Rate Mismatch",
-    "EWAYBILL_MISMATCH": "E-Way Bill Mismatch",
-    "VENDOR_RISK": "Vendor Risk",
+# ── DEMO fallback ───────────────────────────────────────
+DEMO_RESULT = {
+    "gstin": "27AADCB2230M1ZT",
+    "period": "Oct 2024",
+    "total_invoices_checked": 25,
+    "reconciliation_score": 72.0,
+    "total_itc_at_risk": 185400,
+    "risk_summary": {"high": 2, "medium": 3, "low": 1},
+    "mismatch_breakdown": {
+        "Invoice Missing in GSTR-2B": 3,
+        "Taxable Value Mismatch": 2,
+        "Tax Rate Mismatch": 1,
+        "GSTIN Mismatch": 1,
+        "Period Mismatch": 0,
+    },
+    "mismatches": [
+        {"invoiceId": "INV-2024-003", "mismatchType": "TYPE_1", "riskLevel": "HIGH",
+         "amount": 59000, "supplierAmount": 50000, "buyerAmount": 0, "difference": 59000,
+         "detail": "Invoice INV-2024-003 filed in GSTR-1 for ₹59,000 but NOT reflected in GSTR-2B. ITC of ₹9,000 blocked under Rule 36(4).",
+         "gstin": "27AADCB2230M1ZT", "vendorGstin": "27BBPFU1234G1ZW", "period": "Oct 2024", "severity": 80},
+        {"invoiceId": "INV-2024-001", "mismatchType": "TYPE_2", "riskLevel": "HIGH",
+         "amount": 900, "supplierAmount": 100000, "buyerAmount": 95000, "difference": 5000,
+         "detail": "Taxable value mismatch: GSTR-1 ₹1,00,000 vs GSTR-2B ₹95,000 (diff ₹5,000, 5.0%). Tax on difference: ₹900 at risk.",
+         "gstin": "27AADCB2230M1ZT", "vendorGstin": "27BBPFU1234G1ZW", "period": "Oct 2024", "severity": 30},
+        {"invoiceId": "INV-2024-007", "mismatchType": "TYPE_4", "riskLevel": "HIGH",
+         "amount": 12600, "supplierAmount": 70000, "buyerAmount": 70000, "difference": 12600,
+         "detail": "Invoice INV-2024-007 references wrong buyer GSTIN. ITC of ₹12,600 cannot be claimed.",
+         "gstin": "27AADCB2230M1ZT", "vendorGstin": "27BBPFU1234G1ZW", "period": "Oct 2024", "severity": 80},
+        {"invoiceId": "INV-2024-015", "mismatchType": "TYPE_1", "riskLevel": "MEDIUM",
+         "amount": 18500, "supplierAmount": 45000, "buyerAmount": 0, "difference": 18500,
+         "detail": "Invoice INV-2024-015 filed in GSTR-1 but missing from GSTR-2B. ITC ₹18,500 blocked.",
+         "gstin": "27AADCB2230M1ZT", "vendorGstin": "33ABDCK3456N1ZT", "period": "Oct 2024", "severity": 65},
+        {"invoiceId": "INV-2024-009", "mismatchType": "TYPE_3", "riskLevel": "MEDIUM",
+         "amount": 6400, "supplierAmount": 120000, "buyerAmount": 120000, "difference": 4.0,
+         "detail": "Tax rate mismatch: GSTR-1 effective 18.0% vs GSTR-2B 12.0%. Difference: ₹6,400.",
+         "gstin": "27AADCB2230M1ZT", "vendorGstin": "27BBPFU1234G1ZW", "period": "Oct 2024", "severity": 50},
+        {"invoiceId": "INV-2024-012", "mismatchType": "TYPE_2", "riskLevel": "LOW",
+         "amount": 2700, "supplierAmount": 85000, "buyerAmount": 70000, "difference": 15000,
+         "detail": "Taxable value mismatch: GSTR-1 ₹85,000 vs GSTR-2B ₹70,000. Tax on difference: ₹2,700.",
+         "gstin": "27AADCB2230M1ZT", "vendorGstin": "27BBPFU1234G1ZW", "period": "Oct 2024", "severity": 30},
+    ],
+    "audit_trail": [
+        "Supplier (GSTIN: 27BBPFU1234G1ZW) filed invoice INV-2024-003 for ₹59,000. However, your GSTR-2B shows: Invoice Missing in GSTR-2B. This puts ₹9,000 of ITC at risk. Recommended action: Contact supplier to file GSTR-1 for this period.",
+        "Supplier (GSTIN: 27BBPFU1234G1ZW) filed invoice INV-2024-001 for ₹1,00,000. However, your GSTR-2B shows: Taxable Value Mismatch. This puts ₹900 of ITC at risk. Recommended action: Verify invoice with supplier and request credit/debit note.",
+        "Supplier (GSTIN: 27BBPFU1234G1ZW) filed invoice INV-2024-007 for ₹70,000. However, your GSTR-2B shows: GSTIN Mismatch. This puts ₹12,600 of ITC at risk. Recommended action: Request supplier to amend invoice with correct buyer GSTIN.",
+        "Supplier (GSTIN: 33ABDCK3456N1ZT) filed invoice INV-2024-015 for ₹45,000. However, your GSTR-2B shows: Invoice Missing in GSTR-2B. This puts ₹18,500 of ITC at risk. Recommended action: Contact supplier to file GSTR-1.",
+        "Supplier (GSTIN: 27BBPFU1234G1ZW) filed invoice INV-2024-009 for ₹1,20,000. However, your GSTR-2B shows: Tax Rate Mismatch. This puts ₹6,400 of ITC at risk. Recommended action: Check HSN code classification.",
+        "Supplier (GSTIN: 27BBPFU1234G1ZW) filed invoice INV-2024-012 for ₹85,000. However, your GSTR-2B shows: Taxable Value Mismatch. This puts ₹2,700 of ITC at risk. Recommended action: Verify invoice with supplier.",
+    ],
 }
 
-# ── Demo fallback data ──────────────────────────────────
-DEMO_RESULT = {
-    "jobId": "DEMO-001",
-    "gstin": "27AADCB2230M1ZT",
-    "period": "2024-01",
-    "summary": {"totalInvoices": 25, "matched": 20, "mismatches": 5, "matchRate": 0.80},
-    "totalItcAtRisk": 187500,
-    "mismatchBreakdown": {"MISSING_GSTR1": 2, "MISMATCH_AMOUNT": 2, "ITC_NOT_REFLECTED": 1},
-}
-DEMO_MISMATCHES = [
-    {"invoiceId": "INV-2024-01-005", "gstin": "27AADCB2230M1ZT", "vendorGstin": "19AABCG1234Q1Z2", "period": "2024-01", "mismatchType": "MISSING_GSTR1", "riskLevel": "HIGH", "severity": 90, "amount": 72000, "detail": "Invoice INV-2024-01-005 filed in GSTR-1 but NOT reflected in GSTR-2B. ITC of ₹72,000 is blocked under Rule 36(4)."},
-    {"invoiceId": "INV-2024-01-012", "gstin": "27AADCB2230M1ZT", "vendorGstin": "27AAACF9999K1Z9", "period": "2024-01", "mismatchType": "MISMATCH_AMOUNT", "riskLevel": "MEDIUM", "severity": 65, "amount": 28500, "detail": "Amount mismatch: GSTR-1 shows ₹3,50,000 but GSTR-2B shows ₹3,21,500 (difference: ₹28,500, 8.1%). Excess ITC of ₹28,500 at risk."},
-    {"invoiceId": "INV-2024-01-018", "gstin": "27AADCB2230M1ZT", "vendorGstin": "07AABCS7777H1Z1", "period": "2024-01", "mismatchType": "MISSING_GSTR1", "riskLevel": "HIGH", "severity": 85, "amount": 54000, "detail": "Invoice INV-2024-01-018 in GSTR-1 but missing from GSTR-2B. ITC ₹54,000 blocked."},
-    {"invoiceId": "INV-2024-01-022", "gstin": "27AADCB2230M1ZT", "vendorGstin": "19AABCG1234Q1Z2", "period": "2024-01", "mismatchType": "ITC_NOT_REFLECTED", "riskLevel": "MEDIUM", "severity": 60, "amount": 18000, "detail": "Invoice INV-2024-01-022 in GSTR-2B but supplier did not file GSTR-1. ITC ₹18,000 at risk."},
-    {"invoiceId": "INV-2024-01-025", "gstin": "27AADCB2230M1ZT", "vendorGstin": "27AAACF9999K1Z9", "period": "2024-01", "mismatchType": "MISMATCH_AMOUNT", "riskLevel": "LOW", "severity": 35, "amount": 15000, "detail": "Amount mismatch: GSTR-1 shows ₹1,20,000 but GSTR-2B shows ₹1,05,000 (difference: ₹15,000). Excess ITC ₹15,000."},
-]
-DEMO_TRAIL = {
-    "invoiceId": "INV-2024-01-005",
-    "hops": [
-        {"node": "e-Invoice / IRN", "status": "PASS", "detail": "Invoice has a valid IRN generated on the e-Invoice portal."},
-        {"node": "GSTR-1 (Supplier)", "status": "FAIL", "detail": "Invoice was NOT found in the supplier's GSTR-1 filing for this period."},
-        {"node": "GSTR-2B (Auto-populated)", "status": "FAIL", "detail": "Since GSTR-1 was not filed, invoice did not auto-populate into the buyer's GSTR-2B."},
-        {"node": "E-Way Bill", "status": "WARN", "detail": "E-Way Bill status could not be verified."},
-        {"node": "GSTR-3B (Buyer)", "status": "WARN", "detail": "Buyer claimed ITC in GSTR-3B. This claim is at risk because GSTR-2B does not reflect this invoice."},
-    ],
-    "rootCause": "Supplier failed to file GSTR-1 for this period. ITC blocked under Rule 36(4).",
-    "legalSection": "Rule 36(4) r/w Section 16(2)(aa) CGST Act 2017",
-    "recommendedAction": "Issue SCN to supplier requesting GSTR-1 filing within 15 days.",
+MISMATCH_LABELS = {
+    "TYPE_1": "Invoice Missing in GSTR-2B",
+    "TYPE_2": "Taxable Value Mismatch",
+    "TYPE_3": "Tax Rate Mismatch",
+    "TYPE_4": "GSTIN Mismatch",
+    "TYPE_5": "Period Mismatch",
 }
 
 # ── Header ──────────────────────────────────────────────
-st.markdown("## 🔄 GSTR Reconciliation Engine")
-st.caption("Compare GSTR-1 (outward supplies) vs GSTR-2B (auto-populated ITC) — find mismatches, assess risk, trace audit trail.")
+st.title("🔄 GSTR Reconciliation Engine")
+st.caption("Compare GSTR-1 (supplier filed) vs GSTR-2B (buyer sees) — catch mismatches before filing")
 
-st.divider()
-
-# ── Input controls ──────────────────────────────────────
-col1, col2, col3 = st.columns([2, 1, 1])
+# ── Input Row ───────────────────────────────────────────
+col1, col2, col3 = st.columns([2, 2, 1])
 with col1:
-    gstin = st.text_input("GSTIN", value="27AADCB2230M1ZT", help="Enter GSTIN to reconcile")
+    gstin = st.text_input("Supplier GSTIN", value="27AADCB2230M1ZT")
 with col2:
-    months = [f"2024-{m:02d}" for m in range(1, 13)]
-    period = st.selectbox("Period", months, index=0)
+    period = st.selectbox("Period", [
+        "Jan 2024", "Feb 2024", "Mar 2024",
+        "Oct 2024", "Nov 2024", "Dec 2024",
+    ], index=3)
 with col3:
     st.write("")
     st.write("")
-    run_btn = st.button("▶ Run Reconciliation", use_container_width=True, type="primary")
+    run_btn = st.button("🔍 Run Reconciliation", use_container_width=True, type="primary")
 
 # ── Run reconciliation ──────────────────────────────────
-demo_mode = False
 if run_btn:
-    with st.spinner("Running GSTR-1 vs GSTR-2B reconciliation…"):
+    with st.spinner("Running multi-hop graph traversal..."):
         try:
             r = api_post("/api/reconcile/run", json_body={"gstin": gstin, "period": period})
             if r.status_code == 200:
@@ -132,166 +137,136 @@ if run_btn:
         except Exception:
             st.session_state["recon_result"] = DEMO_RESULT
             st.session_state["recon_demo"] = True
-    # Also fetch mismatches
-    with st.spinner("Fetching mismatches…"):
-        try:
-            r2 = api_get(f"/api/reconcile/mismatches/{gstin}?period={period}")
-            if r2.status_code == 200:
-                st.session_state["recon_mismatches"] = r2.json().get("items", [])
-            else:
-                raise Exception(f"HTTP {r2.status_code}")
-        except Exception:
-            st.session_state["recon_mismatches"] = DEMO_MISMATCHES
-            st.session_state["recon_demo"] = True
 
 # ── Display results ─────────────────────────────────────
-if "recon_result" in st.session_state:
-    data = st.session_state["recon_result"]
-    is_demo = st.session_state.get("recon_demo", False)
-    summary = data.get("summary", {})
+result = st.session_state.get("recon_result")
+if not result:
+    st.info("Enter a GSTIN and click **Run Reconciliation** to start.")
+    st.stop()
 
-    if is_demo:
-        st.markdown('<span class="demo-badge">[DEMO]</span>', unsafe_allow_html=True)
-
-    st.markdown("### 📊 Summary")
-    mcols = st.columns(4)
-    mcols[0].metric("Total Invoices", summary.get("totalInvoices", "—"))
-    mcols[1].metric("Matched ✅", summary.get("matched", "—"))
-    mcols[2].metric("Mismatches ⚠️", summary.get("mismatches", "—"))
-    match_rate = summary.get("matchRate", 0)
-    mcols[3].metric("Match Rate", f"{match_rate:.0%}" if isinstance(match_rate, (int, float)) else match_rate)
-
-    st.divider()
-
-    # Big ITC at risk metric
-    itc_risk = data.get("totalItcAtRisk", 0)
-    st.metric("💰 Total ITC at Risk", inr(itc_risk))
-
-    st.divider()
-
-    # ── Bar chart: mismatches by type ───────────────────
-    breakdown = data.get("mismatchBreakdown", {})
-    if breakdown:
-        st.markdown("### 📈 Mismatches by Type")
-        types = list(breakdown.keys())
-        counts = list(breakdown.values())
-        labels = [TYPE_LABEL.get(t, t) for t in types]
-        colors = []
-        for t in types:
-            if "MISSING" in t or "NOT_REFLECTED" in t:
-                colors.append("#FF4444")
-            elif "MISMATCH" in t or "EXCESS" in t:
-                colors.append("#FF9933")
-            else:
-                colors.append("#44AA44")
-        fig = go.Figure(go.Bar(
-            x=labels, y=counts,
-            marker_color=colors,
-            text=counts, textposition="auto",
-        ))
-        fig.update_layout(
-            plot_bgcolor="#0A1628", paper_bgcolor="#0A1628",
-            font_color="#E0E0E0",
-            xaxis_title="Mismatch Type", yaxis_title="Count",
-            height=350, margin=dict(l=40, r=20, t=30, b=60),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    st.divider()
-
-    # ── Mismatch table ──────────────────────────────────
-    mismatches = st.session_state.get("recon_mismatches", [])
-    if mismatches:
-        st.markdown("### 🔍 Mismatch Details")
-
-        # DataFrame view
-        df = pd.DataFrame(mismatches)
-        display_cols = ["invoiceId", "mismatchType", "riskLevel", "amount", "vendorGstin"]
-        available = [c for c in display_cols if c in df.columns]
-        if available:
-            styled_df = df[available].copy()
-            styled_df["amount"] = styled_df["amount"].apply(lambda x: inr(x))
-            styled_df["riskLevel"] = styled_df["riskLevel"].apply(lambda x: f"{RISK_BADGE.get(x, '⚪')} {x}")
-            styled_df["mismatchType"] = styled_df["mismatchType"].apply(lambda x: TYPE_LABEL.get(x, x))
-            styled_df.columns = ["Invoice", "Type", "Risk", "ITC at Risk", "Vendor GSTIN"]
-            st.dataframe(styled_df, use_container_width=True, hide_index=True)
-
-        st.divider()
-
-        # ── Expandable audit trails ─────────────────────
-        st.markdown("### 📋 Audit Trail per Mismatch")
-        for m in mismatches:
-            inv_id = m.get("invoiceId", "?")
-            risk = m.get("riskLevel", "MEDIUM")
-            icon = RISK_BADGE.get(risk, "⚪")
-            mtype = TYPE_LABEL.get(m.get("mismatchType", ""), m.get("mismatchType", ""))
-
-            with st.expander(f"{icon} **{inv_id}** — {mtype} — {inr(m.get('amount', 0))} at risk"):
-                st.write(m.get("detail", "No detail available."))
-
-                st.divider()
-                st.markdown("**Document Trace:**")
-
-                # Fetch audit trail
-                trail = None
-                try:
-                    ar = api_get(f"/api/reconcile/audit-trail/{inv_id}")
-                    if ar.status_code == 200:
-                        trail = ar.json()
-                except Exception:
-                    pass
-
-                if not trail:
-                    trail = DEMO_TRAIL
-
-                hops = trail.get("hops", [])
-                for i, hop in enumerate(hops):
-                    status = hop.get("status", "?")
-                    status_icon = {"PASS": "✅", "FAIL": "❌", "WARN": "⚠️", "SKIP": "⏭️"}.get(status, "❓")
-                    st.write(f"{i+1}. {status_icon} **{hop.get('node', '?')}** — {hop.get('detail', '')}")
-
-                st.divider()
-                st.info(f"**Root Cause:** {trail.get('rootCause', 'N/A')}")
-                st.caption(f"Legal basis: {trail.get('legalSection', 'N/A')} · Action: {trail.get('recommendedAction', 'N/A')}")
-
-        st.divider()
-
-        # ── PDF download ────────────────────────────────
-        st.markdown("### 📥 Export")
-        report_lines = [
-            f"GSTR RECONCILIATION AUDIT REPORT",
-            f"Generated: {datetime.now().strftime('%d-%b-%Y %H:%M')}",
-            f"GSTIN: {gstin}   Period: {period}",
-            f"{'='*60}",
-            f"Total Invoices: {summary.get('totalInvoices', '—')}",
-            f"Matched:        {summary.get('matched', '—')}",
-            f"Mismatches:     {summary.get('mismatches', '—')}",
-            f"Match Rate:     {match_rate:.0%}" if isinstance(match_rate, (int, float)) else f"Match Rate: {match_rate}",
-            f"Total ITC at Risk: {inr(itc_risk)}",
-            f"{'='*60}",
-            "",
-            "MISMATCH DETAILS:",
-            "-" * 60,
-        ]
-        for m in mismatches:
-            report_lines.append(f"Invoice: {m.get('invoiceId', '?')}")
-            report_lines.append(f"  Type:   {TYPE_LABEL.get(m.get('mismatchType', ''), m.get('mismatchType', ''))}")
-            report_lines.append(f"  Risk:   {m.get('riskLevel', '?')}")
-            report_lines.append(f"  Amount: {inr(m.get('amount', 0))}")
-            report_lines.append(f"  Detail: {m.get('detail', 'N/A')}")
-            report_lines.append(f"  Vendor: {m.get('vendorGstin', '?')}")
-            report_lines.append("-" * 60)
-
-        report_text = "\n".join(report_lines)
-        st.download_button(
-            "⬇️ Download Audit Report",
-            data=report_text,
-            file_name=f"recon_audit_{gstin}_{period}.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
-    else:
-        st.success("No mismatches found — GSTR-1 and GSTR-2B are fully reconciled! 🎉")
+is_demo = st.session_state.get("recon_demo", False)
+if is_demo:
+    st.markdown('<span class="demo-badge">[DEMO DATA]</span>', unsafe_allow_html=True)
 
 st.divider()
-st.caption("Powered by TaxIQ Reconciliation Engine · GSTR-1 vs GSTR-2B · Rule 36(4)")
+
+# ── Row 1: Metric Cards ────────────────────────────────
+m1, m2, m3, m4 = st.columns(4)
+total_inv = result.get("total_invoices_checked", 0)
+itc_risk = result.get("total_itc_at_risk", 0)
+score = result.get("reconciliation_score", 0)
+mm_count = len(result.get("mismatches", []))
+
+m1.metric("Total Invoices Checked", total_inv)
+m2.metric("ITC At Risk", fmt_inr(itc_risk), delta=f"-{fmt_inr(itc_risk)}" if itc_risk > 0 else "0",
+          delta_color="inverse")
+score_color = "🟢" if score > 90 else "🟡" if score > 70 else "🔴"
+m3.metric("Reconciliation Score", f"{score_color} {score}%")
+m4.metric("Mismatches Found", mm_count)
+
+st.divider()
+
+# ── Row 2: Mismatch Type Bar Chart ─────────────────────
+st.markdown("### Mismatches by Type")
+breakdown = result.get("mismatch_breakdown", {})
+if not breakdown:
+    # Build from mismatches list
+    for mm in result.get("mismatches", []):
+        label = MISMATCH_LABELS.get(mm.get("mismatchType", ""), mm.get("mismatchType", ""))
+        breakdown[label] = breakdown.get(label, 0) + 1
+
+types = list(breakdown.keys())
+counts = list(breakdown.values())
+
+# Color by risk summary
+risk = result.get("risk_summary", {})
+colors = []
+for t in types:
+    c = counts[types.index(t)]
+    if c >= 3:
+        colors.append("#D63031")  # crimson
+    elif c >= 1:
+        colors.append("#FDCB6E")  # amber
+    else:
+        colors.append("#00B894")  # emerald
+
+fig_bar = go.Figure(go.Bar(
+    y=types,
+    x=counts,
+    orientation="h",
+    marker_color=colors,
+    text=counts,
+    textposition="auto",
+))
+fig_bar.update_layout(
+    template="plotly_dark",
+    paper_bgcolor="#0A1628",
+    plot_bgcolor="#0D1F3C",
+    font_color="#F8F9FA",
+    height=280,
+    margin=dict(l=20, r=20, t=10, b=10),
+    xaxis_title="Count",
+)
+st.plotly_chart(fig_bar, use_container_width=True)
+
+st.divider()
+
+# ── Row 3: Mismatch Detail Table ───────────────────────
+st.markdown("### Mismatch Details")
+mismatches = result.get("mismatches", [])
+if mismatches:
+    import pandas as pd
+    rows = []
+    for mm in mismatches:
+        risk_badge = {"HIGH": "🔴 HIGH", "MEDIUM": "🟡 MEDIUM", "LOW": "🟢 LOW", "CRITICAL": "🔴 CRITICAL"}
+        rows.append({
+            "Invoice No": mm.get("invoiceId", ""),
+            "Type": MISMATCH_LABELS.get(mm.get("mismatchType", ""), mm.get("mismatchType", "")),
+            "Supplier Amount": fmt_inr(mm.get("supplierAmount", 0) or 0),
+            "Buyer Amount": fmt_inr(mm.get("buyerAmount", 0) or 0),
+            "Difference": fmt_inr(mm.get("difference", 0) or 0),
+            "Risk Level": risk_badge.get(mm.get("riskLevel", "LOW"), mm.get("riskLevel", "")),
+            "Status": "Open",
+        })
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+else:
+    st.success("No mismatches found! All invoices reconciled ✅")
+
+st.divider()
+
+# ── Row 4: Audit Trail ─────────────────────────────────
+st.markdown("### Audit Trail")
+audit = result.get("audit_trail", [])
+for i, mm in enumerate(mismatches):
+    inv_id = mm.get("invoiceId", f"Invoice {i+1}")
+    mm_type = MISMATCH_LABELS.get(mm.get("mismatchType", ""), mm.get("mismatchType", ""))
+    risk_amt = mm.get("amount", 0)
+    with st.expander(f"{inv_id} — {mm_type} — {fmt_inr(risk_amt)} at risk"):
+        trail_text = audit[i] if i < len(audit) else mm.get("detail", "No details available.")
+        st.write(trail_text)
+        if st.button(f"📋 Copy for CA", key=f"copy_{i}"):
+            st.code(trail_text, language=None)
+            st.toast("Text ready to copy!", icon="📋")
+
+st.divider()
+
+# ── Download Audit Report ───────────────────────────────
+report_text = f"TaxIQ GSTR Reconciliation Audit Report\n{'='*50}\n"
+report_text += f"GSTIN: {result.get('gstin', gstin)}\n"
+report_text += f"Period: {result.get('period', period)}\n"
+report_text += f"Reconciliation Score: {score}%\n"
+report_text += f"Total ITC at Risk: {fmt_inr(itc_risk)}\n"
+report_text += f"Mismatches: {mm_count}\n\n"
+for i, trail in enumerate(audit):
+    report_text += f"{i+1}. {trail}\n\n"
+
+st.download_button(
+    "📥 Download Full Audit Report",
+    data=report_text,
+    file_name=f"recon_audit_{gstin}_{period.replace(' ', '_')}.txt",
+    mime="text/plain",
+    use_container_width=True,
+)
+
+st.caption("Powered by NEXUS Reconciliation Engine · Rule 36(4) · CGST Act 2017 · TaxIQ")

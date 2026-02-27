@@ -14,6 +14,7 @@ from backend.agents.fraud_agent import FraudAgent
 from backend.agents.gst_agent import GSTAgent
 from backend.agents.tax_saver_agent import TaxSaverAgent
 from backend.api.router import api_router
+from backend.api.routes.whatsapp import router as whatsapp_router
 from backend.database.postgres_client import postgres_client
 from backend.graph.mock_data_loader import load_mock_fraud_data
 from backend.utils.pdf_generator import generate_tax_report_pdf
@@ -36,6 +37,8 @@ app.add_middleware(
 
 # Include NEXUS GST API routes (graph, fraud, reconciliation, vendors, notices, recovery, websocket)
 app.include_router(api_router)
+# Include WhatsApp Twilio webhook
+app.include_router(whatsapp_router)
 
 
 @app.on_event("startup")
@@ -49,7 +52,42 @@ async def _startup() -> None:
 
 @app.get("/health")
 async def health() -> Dict[str, Any]:
-    return {"ok": True, "service": "taxiq-backend"}
+    status: Dict[str, Any] = {"ok": True, "service": "taxiq-backend"}
+
+    # Neo4j — True if connected, "demo" if using networkx fallback
+    try:
+        from backend.graph.neo4j_client import get_neo4j_client
+        nc = get_neo4j_client()
+        res = await nc.run_query("RETURN 1 AS ok")
+        status["neo4j"] = True
+    except Exception:
+        status["neo4j"] = "demo"          # networkx fallback active
+
+    # PostgreSQL — True if connected, "demo" if using in-memory fallback
+    try:
+        from sqlalchemy import text as _sa_text
+        with postgres_client.engine.connect() as conn:
+            conn.execute(_sa_text("SELECT 1"))
+        status["postgres"] = True
+    except Exception:
+        status["postgres"] = "demo"       # in-memory fallback active
+
+    # Redis — True if reachable, "demo" if not (app still works)
+    try:
+        import redis as _redis
+        r = _redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+        r.ping()
+        status["redis"] = True
+    except Exception:
+        status["redis"] = "demo"          # Celery disabled, app works
+
+    # Gemini AI — True if key set, "demo" if using demo responses
+    status["gemini"] = True if os.getenv("GOOGLE_API_KEY") else "demo"
+
+    # WhatsApp Bot — True if Twilio configured, "demo" if mock mode
+    status["whatsapp"] = True if os.getenv("TWILIO_ACCOUNT_SID") else "demo"
+
+    return status
 
 
 @app.post("/gst/process-invoice")
@@ -65,14 +103,18 @@ async def gst_process_invoice(file: UploadFile = File(...)) -> Dict[str, Any]:
         out_path = Path(td) / f"upload{suffix}"
         out_path.write_bytes(await file.read())
 
-        agent = GSTAgent()
-        result = await agent.process_invoice(str(out_path))
+        try:
+            agent = GSTAgent()
+            result = await agent.process_invoice(str(out_path))
 
-        # build return totals for the buyer gstin if present
-        buyer = result["invoice"].get("buyer_gstin") or "27AAACG1000A1Z5"
-        period = str(result["invoice"].get("invoice_date", "2024-01-01"))[:7]
-        result["gstr1_return_preview"] = agent.build_gstr1_return(user_gstin=buyer, period=period)
-        return result
+            # build return totals for the buyer gstin if present
+            buyer = result["invoice"].get("buyer_gstin") or "27AAACG1000A1Z5"
+            period = str(result["invoice"].get("invoice_date", "2024-01-01"))[:7]
+            result["gstr1_return_preview"] = agent.build_gstr1_return(user_gstin=buyer, period=period)
+            return result
+        except Exception as e:
+            logger.exception("Invoice processing failed")
+            raise HTTPException(status_code=500, detail=f"Invoice processing failed: {e}")
 
 
 @app.get("/gst/gstr1-return")

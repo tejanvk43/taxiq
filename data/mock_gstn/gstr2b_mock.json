@@ -1,0 +1,93 @@
+{
+  "gstin": "27AADCB2230M1ZT",
+  "period": "102024",
+  "b2b": [
+    {
+      "ctin": "27BBPFU1234G1ZW",
+      "inv": [
+        {
+          "inum": "INV-2024-001",
+          "idt": "05-10-2024",
+          "val": 112100,
+          "pos": "27",
+          "itms": [{"num": 1, "itm_det": {"hsn": "8471", "txval": 95000, "rt": 18, "camt": 8550, "samt": 8550, "iamt": 0}}],
+          "_note": "TYPE_2: taxable value mismatch — shows 95000 instead of 100000"
+        },
+        {
+          "inum": "INV-2024-002",
+          "idt": "08-10-2024",
+          "val": 236000,
+          "pos": "27",
+          "itms": [{"num": 1, "itm_det": {"hsn": "7308", "txval": 200000, "rt": 18, "camt": 18000, "samt": 18000, "iamt": 0}}],
+          "_note": "MATCHED — correct"
+        },
+        {
+          "inum": "INV-2024-004",
+          "idt": "15-10-2024",
+          "val": 472000,
+          "pos": "29",
+          "itms": [{"num": 1, "itm_det": {"hsn": "3923", "txval": 400000, "rt": 18, "camt": 0, "samt": 0, "iamt": 72000}}],
+          "_note": "MATCHED — correct"
+        },
+        {
+          "inum": "INV-2024-005",
+          "idt": "18-10-2024",
+          "val": 35400,
+          "pos": "27",
+          "itms": [{"num": 1, "itm_det": {"hsn": "4901", "txval": 30000, "rt": 18, "camt": 2700, "samt": 2700, "iamt": 0}}],
+          "_note": "MATCHED — correct"
+        },
+        {
+          "inum": "INV-2024-006",
+          "idt": "20-10-2024",
+          "val": 177000,
+          "pos": "27",
+          "itms": [{"num": 1, "itm_det": {"hsn": "9403", "txval": 150000, "rt": 18, "camt": 13500, "samt": 13500, "iamt": 0}}],
+          "_note": "MATCHED — correct"
+        },
+        {
+          "inum": "INV-2024-007",
+          "idt": "22-10-2024",
+          "val": 82600,
+          "pos": "27",
+          "rchrg": "N",
+          "supplier_gstin_override": "99ZZZZZ9999Z9Z1",
+          "itms": [{"num": 1, "itm_det": {"hsn": "8504", "txval": 70000, "rt": 18, "camt": 6300, "samt": 6300, "iamt": 0}}],
+          "_note": "TYPE_4: wrong buyer GSTIN"
+        },
+        {
+          "inum": "INV-2024-008",
+          "idt": "25-10-2024",
+          "val": 354000,
+          "pos": "27",
+          "itms": [{"num": 1, "itm_det": {"hsn": "7210", "txval": 300000, "rt": 18, "camt": 27000, "samt": 27000, "iamt": 0}}],
+          "_note": "MATCHED — correct"
+        },
+        {
+          "inum": "INV-2024-009",
+          "idt": "27-10-2024",
+          "val": 141600,
+          "pos": "27",
+          "itms": [{"num": 1, "itm_det": {"hsn": "9801", "txval": 120000, "rt": 18, "camt": 10800, "samt": 10800, "iamt": 0}}],
+          "_note": "MATCHED — correct"
+        },
+        {
+          "inum": "INV-2024-010",
+          "idt": "30-10-2024",
+          "val": 23600,
+          "pos": "27",
+          "itms": [{"num": 1, "itm_det": {"hsn": "9018", "txval": 20000, "rt": 18, "camt": 1800, "samt": 1800, "iamt": 0}}],
+          "_note": "MATCHED — correct"
+        }
+      ]
+    }
+  ],
+  "_summary": {
+    "total_in_gstr1": 10,
+    "reflected_correctly": 7,
+    "missing": ["INV-2024-003"],
+    "amount_mismatch": ["INV-2024-001"],
+    "gstin_mismatch": ["INV-2024-007"],
+    "match_rate": "70%"
+  }
+}

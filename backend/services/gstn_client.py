@@ -22,6 +22,29 @@ class GSTNClient:
         self._mock = MockGSTNClient()
         self._rng = random.Random(42)
 
+    async def get_taxpayer_profile(self, gstin: str) -> Dict[str, Any]:
+        """Fetch taxpayer profile. Uses gstin[-3:] as seed for variation."""
+        seed = int(gstin[-3:-1], 36) % 100 if len(gstin) >= 3 else 42
+        rng = random.Random(seed)
+        states = {"27": "Maharashtra", "29": "Karnataka", "07": "Delhi",
+                  "33": "Tamil Nadu", "24": "Gujarat", "09": "Uttar Pradesh",
+                  "19": "West Bengal", "36": "Telangana", "06": "Haryana"}
+        state_code = gstin[:2] if len(gstin) >= 2 else "27"
+        turnover = rng.randint(5_00_000, 50_00_00_000)
+        return {
+            "gstin": gstin,
+            "tradeName": f"M/s {gstin[2:7]} Enterprises",
+            "legalName": f"{gstin[2:7]} Private Limited",
+            "state": states.get(state_code, "Maharashtra"),
+            "stateCode": state_code,
+            "registrationDate": "2019-04-01",
+            "status": "Active",
+            "taxpayerType": "Regular",
+            "annualTurnover": turnover,
+            "lastFiledReturn": "GSTR-3B",
+            "lastFiledDate": datetime.utcnow().strftime("%Y-%m") + "-11",
+        }
+
     async def get_gstr1(self, gstin: str, period: str, otp: str = "") -> Dict[str, Any]:
         """Fetch GSTR-1 (outward supplies filed by supplier)."""
         raw = await self._mock.get_gstr1(gstin=gstin, period=period, otp=otp)
