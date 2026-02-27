@@ -1,0 +1,53 @@
+{
+  "gstins": [
+    { "gstin": "27AAACG1000A1Z5", "name": "Aarohan Metals Pvt Ltd", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG1001A1Z4", "name": "Bhavya Traders LLP", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG1002A1Z3", "name": "Citrine Components", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG1003A1Z2", "name": "Dhanush Logistics", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG1004A1Z1", "name": "Eklavya Polymers", "state": "MH", "type": "REGULAR" },
+
+    { "gstin": "27AAACG2000A1Z5", "name": "Fortune Fasteners", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2001A1Z4", "name": "Greenfield Textiles", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2002A1Z3", "name": "Harbor Electricals", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2003A1Z2", "name": "Indus Packaging", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2004A1Z1", "name": "Jupiter Machines", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2005A1Z9", "name": "Kaveri Industrial Supply", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2006A1Z8", "name": "Lumen Auto Parts", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2007A1Z7", "name": "Marina Chemicals", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2008A1Z6", "name": "Nava Agro Products", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2009A1Z5", "name": "Orion Tools & Dies", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2010A1Z4", "name": "Pioneer Bearings", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2011A1Z3", "name": "Quartz Cables", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2012A1Z2", "name": "Riviera Hardware", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2013A1Z1", "name": "Saffron Steel Traders", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27AAACG2014A1Z9", "name": "Trident Electronics", "state": "MH", "type": "REGULAR" },
+
+    { "gstin": "27FAKES7777F1Z9", "name": "Shivam Enterprises [SUSPICIOUS]", "state": "MH", "type": "REGULAR" },
+    { "gstin": "27FAKES8888F1Z8", "name": "Rapid Billing Co [SUSPICIOUS]", "state": "MH", "type": "REGULAR" }
+  ],
+  "itc_edges": [
+    { "from": "27AAACG1000A1Z5", "to": "27AAACG1001A1Z4", "value": 210000 },
+    { "from": "27AAACG1001A1Z4", "to": "27AAACG1002A1Z3", "value": 195000 },
+    { "from": "27AAACG1002A1Z3", "to": "27AAACG1003A1Z2", "value": 205000 },
+    { "from": "27AAACG1003A1Z2", "to": "27AAACG1004A1Z1", "value": 215000 },
+    { "from": "27AAACG1004A1Z1", "to": "27AAACG1000A1Z5", "value": 225000 },
+
+    { "from": "27FAKES7777F1Z9", "to": "27AAACG2000A1Z5", "value": 180000 },
+    { "from": "27FAKES7777F1Z9", "to": "27AAACG2001A1Z4", "value": 175000 },
+    { "from": "27FAKES7777F1Z9", "to": "27AAACG2002A1Z3", "value": 190000 },
+    { "from": "27FAKES7777F1Z9", "to": "27AAACG2003A1Z2", "value": 165000 },
+    { "from": "27FAKES7777F1Z9", "to": "27AAACG2004A1Z1", "value": 200000 },
+    { "from": "27FAKES7777F1Z9", "to": "27AAACG2005A1Z9", "value": 160000 },
+    { "from": "27FAKES7777F1Z9", "to": "27AAACG2006A1Z8", "value": 172000 },
+    { "from": "27FAKES7777F1Z9", "to": "27AAACG2007A1Z7", "value": 168000 },
+
+    { "from": "27FAKES8888F1Z8", "to": "27AAACG2008A1Z6", "value": 155000 },
+    { "from": "27FAKES8888F1Z8", "to": "27AAACG2009A1Z5", "value": 149000 },
+    { "from": "27FAKES8888F1Z8", "to": "27AAACG2010A1Z4", "value": 162000 },
+    { "from": "27FAKES8888F1Z8", "to": "27AAACG2011A1Z3", "value": 158000 },
+    { "from": "27FAKES8888F1Z8", "to": "27AAACG2012A1Z2", "value": 151000 },
+    { "from": "27FAKES8888F1Z8", "to": "27AAACG2013A1Z1", "value": 164000 },
+    { "from": "27FAKES8888F1Z8", "to": "27AAACG2014A1Z9", "value": 159000 }
+  ]
+}
+
