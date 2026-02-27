@@ -13,13 +13,18 @@ from loguru import logger
 from backend.agents.fraud_agent import FraudAgent
 from backend.agents.gst_agent import GSTAgent
 from backend.agents.tax_saver_agent import TaxSaverAgent
+from backend.api.router import api_router
 from backend.database.postgres_client import postgres_client
 from backend.graph.mock_data_loader import load_mock_fraud_data
 from backend.utils.pdf_generator import generate_tax_report_pdf
 from backend.utils.sample_data import ensure_sample_data
 
 
-app = FastAPI(title="TaxIQ Backend", version="1.0.0")
+app = FastAPI(
+    title="TaxIQ Backend",
+    version="2.0.0",
+    description="TaxIQ + NEXUS GST — Unified Tax Intelligence Platform",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,6 +33,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include NEXUS GST API routes (graph, fraud, reconciliation, vendors, notices, recovery, websocket)
+app.include_router(api_router)
 
 
 @app.on_event("startup")

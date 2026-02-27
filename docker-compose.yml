@@ -36,7 +36,44 @@ services:
     volumes:
       - taxiq_neo4j:/data
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - taxiq_redis:/data
+
+  celery_worker:
+    build: .
+    command: celery -A backend.tasks.celery_app worker --loglevel=info
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    volumes:
+      - .:/app
+    working_dir: /app
+
+  celery_beat:
+    build: .
+    command: celery -A backend.tasks.celery_app beat --loglevel=info
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: .env
+    volumes:
+      - .:/app
+    working_dir: /app
+
 volumes:
   taxiq_postgres: {}
   taxiq_neo4j: {}
+  taxiq_redis: {}
 

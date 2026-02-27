@@ -27,6 +27,9 @@ class Settings(BaseModel):
     NEO4J_USERNAME: str
     NEO4J_PASSWORD: str
     DATABASE_URL: str
+    REDIS_URL: str
+    MOCK_GSTN: bool
+    GSTN_API_KEY: str
     DEBUG: bool
     APP_ENV: str
 
@@ -43,6 +46,9 @@ def get_settings() -> Settings:
         NEO4J_USERNAME=_get_env("NEO4J_USERNAME", "neo4j"),
         NEO4J_PASSWORD=_get_env("NEO4J_PASSWORD", "taxiq123"),
         DATABASE_URL=_get_env("DATABASE_URL", "postgresql://taxiq_user:taxiq_pass@localhost:5432/taxiq"),
+        REDIS_URL=_get_env("REDIS_URL", "redis://localhost:6379/0"),
+        MOCK_GSTN=_get_bool("MOCK_GSTN", True),
+        GSTN_API_KEY=_get_env("GSTN_API_KEY", ""),
         DEBUG=_get_bool("DEBUG", True),
         APP_ENV=_get_env("APP_ENV", "development"),
     )

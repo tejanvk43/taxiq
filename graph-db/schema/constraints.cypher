@@ -1,0 +1,9 @@
+// === CONSTRAINTS ===
+CREATE CONSTRAINT taxpayer_gstin IF NOT EXISTS
+FOR (t:Taxpayer) REQUIRE t.gstin IS UNIQUE;
+
+CREATE CONSTRAINT invoice_irn IF NOT EXISTS
+FOR (i:Invoice) REQUIRE i.irn IS UNIQUE;
+
+CREATE CONSTRAINT invoice_id IF NOT EXISTS
+FOR (i:Invoice) REQUIRE i.invoiceId IS UNIQUE;

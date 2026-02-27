@@ -63,26 +63,37 @@ def api_post(path: str, files=None, data=None, json_body=None):
 st.markdown("## TaxIQ")
 st.caption("India’s Unified Tax Intelligence Agent · GST OCR · ITC Fraud Graph · Personal Tax Saver")
 
-cols = st.columns(3)
+cols = st.columns(4)
 with cols[0]:
     st.metric("Invoices Processed", st.session_state.get("kpi_invoices", 0))
 with cols[1]:
     st.metric("Tax Saved (est.)", inr(st.session_state.get("kpi_tax_saved", 0)))
 with cols[2]:
     st.metric("Frauds Detected", st.session_state.get("kpi_frauds", 0))
+with cols[3]:
+    st.metric("Vendors Scored", st.session_state.get("kpi_vendors", 0))
 
 st.divider()
 
-nav = st.columns(3)
 if hasattr(st, "page_link"):
-    with nav[0]:
+    row1 = st.columns(3)
+    with row1[0]:
         st.page_link("pages/1_📸_GST_Filing.py", label="📸 GST Filing", use_container_width=True)
-    with nav[1]:
+    with row1[1]:
         st.page_link("pages/2_🕸️_Fraud_Graph.py", label="🕸️ Fraud Graph", use_container_width=True)
-    with nav[2]:
+    with row1[2]:
         st.page_link("pages/3_📊_Tax_Saver.py", label="📊 Tax Saver", use_container_width=True)
+    row2 = st.columns(4)
+    with row2[0]:
+        st.page_link("pages/4_🔍_Reconciliation.py", label="🔍 Reconciliation", use_container_width=True)
+    with row2[1]:
+        st.page_link("pages/5_📋_Vendor_Scores.py", label="📋 Vendor Scores", use_container_width=True)
+    with row2[2]:
+        st.page_link("pages/6_📄_Notice_AI.py", label="📄 Notice AI", use_container_width=True)
+    with row2[3]:
+        st.page_link("pages/7_🔄_ITC_Recovery.py", label="🔄 ITC Recovery", use_container_width=True)
 else:
-    st.info("Use the left sidebar page selector to switch between 📸 GST Filing, 🕸️ Fraud Graph, and 📊 Tax Saver pages.")
+    st.info("Use the left sidebar to navigate between all 7 pages.")
 
 st.divider()
 
@@ -96,5 +107,5 @@ try:
 except Exception:
     st.warning("Backend is not reachable. Start it with: `uvicorn backend.main:app --reload --port 8000`")
 
-st.caption("Powered by Claude AI (when configured) · OCR by Tesseract · Graph by Neo4j/networkx · Reports by fpdf2")
+st.caption("Powered by Claude AI (when configured) · OCR by Tesseract · Graph by Neo4j/networkx · NEXUS GST · Reports by fpdf2")
 
