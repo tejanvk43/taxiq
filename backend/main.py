@@ -167,9 +167,12 @@ async def tax_analyze(
 
 @app.post("/tax/report-pdf")
 async def tax_report_pdf(payload: Dict[str, Any]) -> Any:
-    # Write PDF to temp and return
+    # Write PDF to temp, read bytes, then return Response (temp dir cleaned up safely)
     with tempfile.TemporaryDirectory() as td:
         pdf_path = os.path.join(td, "taxiq_report.pdf")
         generate_tax_report_pdf(pdf_path, payload)
-        return FileResponse(pdf_path, media_type="application/pdf", filename="taxiq_report.pdf")
+        pdf_bytes = open(pdf_path, "rb").read()
+    from fastapi.responses import Response
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": "attachment; filename=taxiq_report.pdf"})
 

@@ -4,99 +4,18 @@ Compare GSTR-1 (supplier filed) vs GSTR-2B (buyer sees) — catch mismatches bef
 """
 import json
 import os
+import sys
 
 import httpx
 import plotly.graph_objects as go
 import streamlit as st
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from theme import inject_css, fmt_inr, api_get, api_post, BACKEND_URL, CHART_LAYOUT, COLORS
+
 st.set_page_config(page_title="TaxIQ | Reconciliation", page_icon="🔄", layout="wide")
+inject_css()
 
-BACKEND = os.getenv("TAXIQ_BACKEND_URL", "http://localhost:8000")
-
-# ── Design System CSS ───────────────────────────────────
-st.markdown("""<style>
-    .stApp { background-color: #0A1628; color: #F8F9FA; }
-    .stMetric { background: #0D1F3C; border-radius: 12px;
-                padding: 16px; border-left: 4px solid #FF9933; }
-    .stButton>button { background: #FF9933; color: #0A1628;
-                       font-weight: 700; border-radius: 8px;
-                       border: none; }
-    .stDataFrame { background: #0D1F3C; }
-    div[data-testid="metric-container"] {
-      background: #0D1F3C; border-radius: 10px; padding: 10px; }
-    .demo-badge {
-      display:inline-block; padding:2px 10px; border-radius:999px;
-      background:rgba(253,203,110,.15); border:1px solid #FDCB6E;
-      color:#FDCB6E; font-size:12px; font-weight:600; }
-</style>""", unsafe_allow_html=True)
-
-
-def fmt_inr(n):
-    if n >= 1e7: return f"₹{n/1e7:.1f}Cr"
-    if n >= 1e5: return f"₹{n/1e5:.1f}L"
-    return f"₹{n:,.0f}"
-
-
-def api_post(path, json_body=None):
-    with httpx.Client(timeout=90) as c:
-        return c.post(f"{BACKEND}{path}", json=json_body)
-
-
-def api_get(path):
-    with httpx.Client(timeout=30) as c:
-        return c.get(f"{BACKEND}{path}")
-
-
-# ── DEMO fallback ───────────────────────────────────────
-DEMO_RESULT = {
-    "gstin": "27AADCB2230M1ZT",
-    "period": "Oct 2024",
-    "total_invoices_checked": 25,
-    "reconciliation_score": 72.0,
-    "total_itc_at_risk": 185400,
-    "risk_summary": {"high": 2, "medium": 3, "low": 1},
-    "mismatch_breakdown": {
-        "Invoice Missing in GSTR-2B": 3,
-        "Taxable Value Mismatch": 2,
-        "Tax Rate Mismatch": 1,
-        "GSTIN Mismatch": 1,
-        "Period Mismatch": 0,
-    },
-    "mismatches": [
-        {"invoiceId": "INV-2024-003", "mismatchType": "TYPE_1", "riskLevel": "HIGH",
-         "amount": 59000, "supplierAmount": 50000, "buyerAmount": 0, "difference": 59000,
-         "detail": "Invoice INV-2024-003 filed in GSTR-1 for ₹59,000 but NOT reflected in GSTR-2B. ITC of ₹9,000 blocked under Rule 36(4).",
-         "gstin": "27AADCB2230M1ZT", "vendorGstin": "27BBPFU1234G1ZW", "period": "Oct 2024", "severity": 80},
-        {"invoiceId": "INV-2024-001", "mismatchType": "TYPE_2", "riskLevel": "HIGH",
-         "amount": 900, "supplierAmount": 100000, "buyerAmount": 95000, "difference": 5000,
-         "detail": "Taxable value mismatch: GSTR-1 ₹1,00,000 vs GSTR-2B ₹95,000 (diff ₹5,000, 5.0%). Tax on difference: ₹900 at risk.",
-         "gstin": "27AADCB2230M1ZT", "vendorGstin": "27BBPFU1234G1ZW", "period": "Oct 2024", "severity": 30},
-        {"invoiceId": "INV-2024-007", "mismatchType": "TYPE_4", "riskLevel": "HIGH",
-         "amount": 12600, "supplierAmount": 70000, "buyerAmount": 70000, "difference": 12600,
-         "detail": "Invoice INV-2024-007 references wrong buyer GSTIN. ITC of ₹12,600 cannot be claimed.",
-         "gstin": "27AADCB2230M1ZT", "vendorGstin": "27BBPFU1234G1ZW", "period": "Oct 2024", "severity": 80},
-        {"invoiceId": "INV-2024-015", "mismatchType": "TYPE_1", "riskLevel": "MEDIUM",
-         "amount": 18500, "supplierAmount": 45000, "buyerAmount": 0, "difference": 18500,
-         "detail": "Invoice INV-2024-015 filed in GSTR-1 but missing from GSTR-2B. ITC ₹18,500 blocked.",
-         "gstin": "27AADCB2230M1ZT", "vendorGstin": "33ABDCK3456N1ZT", "period": "Oct 2024", "severity": 65},
-        {"invoiceId": "INV-2024-009", "mismatchType": "TYPE_3", "riskLevel": "MEDIUM",
-         "amount": 6400, "supplierAmount": 120000, "buyerAmount": 120000, "difference": 4.0,
-         "detail": "Tax rate mismatch: GSTR-1 effective 18.0% vs GSTR-2B 12.0%. Difference: ₹6,400.",
-         "gstin": "27AADCB2230M1ZT", "vendorGstin": "27BBPFU1234G1ZW", "period": "Oct 2024", "severity": 50},
-        {"invoiceId": "INV-2024-012", "mismatchType": "TYPE_2", "riskLevel": "LOW",
-         "amount": 2700, "supplierAmount": 85000, "buyerAmount": 70000, "difference": 15000,
-         "detail": "Taxable value mismatch: GSTR-1 ₹85,000 vs GSTR-2B ₹70,000. Tax on difference: ₹2,700.",
-         "gstin": "27AADCB2230M1ZT", "vendorGstin": "27BBPFU1234G1ZW", "period": "Oct 2024", "severity": 30},
-    ],
-    "audit_trail": [
-        "Supplier (GSTIN: 27BBPFU1234G1ZW) filed invoice INV-2024-003 for ₹59,000. However, your GSTR-2B shows: Invoice Missing in GSTR-2B. This puts ₹9,000 of ITC at risk. Recommended action: Contact supplier to file GSTR-1 for this period.",
-        "Supplier (GSTIN: 27BBPFU1234G1ZW) filed invoice INV-2024-001 for ₹1,00,000. However, your GSTR-2B shows: Taxable Value Mismatch. This puts ₹900 of ITC at risk. Recommended action: Verify invoice with supplier and request credit/debit note.",
-        "Supplier (GSTIN: 27BBPFU1234G1ZW) filed invoice INV-2024-007 for ₹70,000. However, your GSTR-2B shows: GSTIN Mismatch. This puts ₹12,600 of ITC at risk. Recommended action: Request supplier to amend invoice with correct buyer GSTIN.",
-        "Supplier (GSTIN: 33ABDCK3456N1ZT) filed invoice INV-2024-015 for ₹45,000. However, your GSTR-2B shows: Invoice Missing in GSTR-2B. This puts ₹18,500 of ITC at risk. Recommended action: Contact supplier to file GSTR-1.",
-        "Supplier (GSTIN: 27BBPFU1234G1ZW) filed invoice INV-2024-009 for ₹1,20,000. However, your GSTR-2B shows: Tax Rate Mismatch. This puts ₹6,400 of ITC at risk. Recommended action: Check HSN code classification.",
-        "Supplier (GSTIN: 27BBPFU1234G1ZW) filed invoice INV-2024-012 for ₹85,000. However, your GSTR-2B shows: Taxable Value Mismatch. This puts ₹2,700 of ITC at risk. Recommended action: Verify invoice with supplier.",
-    ],
-}
 
 MISMATCH_LABELS = {
     "TYPE_1": "Invoice Missing in GSTR-2B",
@@ -107,8 +26,8 @@ MISMATCH_LABELS = {
 }
 
 # ── Header ──────────────────────────────────────────────
-st.title("🔄 GSTR Reconciliation Engine")
-st.caption("Compare GSTR-1 (supplier filed) vs GSTR-2B (buyer sees) — catch mismatches before filing")
+st.markdown('<div class="page-title">🔄 GSTR Reconciliation Engine</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-subtitle">Compare GSTR-1 (supplier filed) vs GSTR-2B (buyer sees) — catch mismatches before filing</div>', unsafe_allow_html=True)
 
 # ── Input Row ───────────────────────────────────────────
 col1, col2, col3 = st.columns([2, 2, 1])
@@ -131,22 +50,16 @@ if run_btn:
             r = api_post("/api/reconcile/run", json_body={"gstin": gstin, "period": period})
             if r.status_code == 200:
                 st.session_state["recon_result"] = r.json()
-                st.session_state["recon_demo"] = False
             else:
-                raise Exception(f"HTTP {r.status_code}")
-        except Exception:
-            st.session_state["recon_result"] = DEMO_RESULT
-            st.session_state["recon_demo"] = True
+                st.error(f"Reconciliation failed: HTTP {r.status_code} — {r.text[:200]}")
+        except Exception as e:
+            st.error(f"Backend not reachable: {e}")
 
 # ── Display results ─────────────────────────────────────
 result = st.session_state.get("recon_result")
 if not result:
     st.info("Enter a GSTIN and click **Run Reconciliation** to start.")
     st.stop()
-
-is_demo = st.session_state.get("recon_demo", False)
-if is_demo:
-    st.markdown('<span class="demo-badge">[DEMO DATA]</span>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -199,12 +112,8 @@ fig_bar = go.Figure(go.Bar(
     textposition="auto",
 ))
 fig_bar.update_layout(
-    template="plotly_dark",
-    paper_bgcolor="#0A1628",
-    plot_bgcolor="#0D1F3C",
-    font_color="#F8F9FA",
+    **CHART_LAYOUT,
     height=280,
-    margin=dict(l=20, r=20, t=10, b=10),
     xaxis_title="Count",
 )
 st.plotly_chart(fig_bar, use_container_width=True)

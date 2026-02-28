@@ -18,13 +18,20 @@ async def run_reconciliation(req: ReconcileRequest):
     engine = ReconciliationEngine()
     result = await engine.reconcile_gstin(gstin=req.gstin, period=req.period)
 
-    await manager.broadcast(
-        req.gstin,
-        {
-            "type": "RECON_COMPLETE",
-            "payload": {"jobId": result["jobId"], "matched": result["summary"]["matched"], "mismatches": result["summary"]["mismatches"]},
-        },
-    )
+    try:
+        await manager.broadcast(
+            req.gstin,
+            {
+                "type": "RECON_COMPLETE",
+                "payload": {
+                    "jobId": result.get("jobId", ""),
+                    "matched": result.get("total_invoices_checked", 0) - len(result.get("mismatches", [])),
+                    "mismatches": len(result.get("mismatches", [])),
+                },
+            },
+        )
+    except Exception:
+        pass
     return result
 
 

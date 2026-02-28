@@ -4,6 +4,7 @@ from pathlib import Path
 
 import httpx
 import streamlit as st
+from theme import inject_css, inr, fmt_inr, api_get, api_post, BACKEND_URL
 
 
 st.set_page_config(
@@ -11,75 +12,45 @@ st.set_page_config(
     page_icon="💰",
     layout="wide",
 )
-
-st.markdown(
-    """
-<style>
-/* TaxIQ dark theme accents */
-section.main { background-color: #0A1628; }
-div[data-testid="stAppViewContainer"] { background-color: #0A1628; }
-div[data-testid="stHeader"] { background-color: rgba(10,22,40,0.6); }
-.taxiq-badge {
-  display:inline-block; padding:2px 8px; border-radius:999px;
-  border:1px solid rgba(255,153,51,.55);
-  background: rgba(255,153,51,.10);
-  color: #FF9933; font-size: 12px;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-BACKEND_URL = os.getenv("TAXIQ_BACKEND_URL", "http://localhost:8000")
+inject_css()
 
 
-def inr(x: float) -> str:
-    try:
-        n = int(round(float(x)))
-    except Exception:
-        return f"₹{x}"
-    s = str(abs(n))
-    if len(s) <= 3:
-        out = s
-    else:
-        out = s[-3:]
-        s = s[:-3]
-        while s:
-            out = s[-2:] + "," + out
-            s = s[:-2]
-    return ("-₹" if n < 0 else "₹") + out
-
-
-def api_get(path: str):
-    with httpx.Client(timeout=30) as client:
-        return client.get(f"{BACKEND_URL}{path}")
-
-
-def api_post(path: str, files=None, data=None, json_body=None):
-    with httpx.Client(timeout=60) as client:
-        return client.post(f"{BACKEND_URL}{path}", files=files, data=data, json=json_body)
-
-
-st.markdown("## TaxIQ")
-st.caption("India's Unified Tax Intelligence Agent · GST OCR · ITC Fraud Graph · Personal Tax Saver · WhatsApp Bot")
+st.markdown('<div class="page-title">TaxIQ</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-subtitle">India\'s Unified Tax Intelligence Agent · GST OCR · ITC Fraud Graph · Personal Tax Saver · WhatsApp Bot</div>', unsafe_allow_html=True)
 
 # ── 7 KPI Cards ─────────────────────────────────────────
+# Fetch live KPIs from backend
+if "kpis_loaded" not in st.session_state:
+    try:
+        with httpx.Client(timeout=10) as c:
+            kpi_resp = c.get(f"{BACKEND_URL}/api/dashboard/kpis").json()
+        st.session_state["kpi_invoices"] = kpi_resp.get("invoices_processed", 0)
+        st.session_state["kpi_frauds"] = kpi_resp.get("fraud_rings", 0)
+        st.session_state["kpi_tax_saved"] = kpi_resp.get("tax_saved", 0)
+        st.session_state["kpi_mismatches"] = kpi_resp.get("mismatches_caught", 0)
+        st.session_state["kpi_vendors"] = kpi_resp.get("vendors_scored", 0)
+        st.session_state["kpi_notices"] = kpi_resp.get("notices_generated", 0)
+        st.session_state["kpi_itc_recovered"] = kpi_resp.get("itc_recovered", 0)
+        st.session_state["kpis_loaded"] = True
+    except Exception:
+        pass
+
 r1 = st.columns(4)
 r2 = st.columns(3)
 with r1[0]:
-    st.metric("Invoices Processed", st.session_state.get("kpi_invoices", 48))
+    st.metric("Invoices Processed", st.session_state.get("kpi_invoices", 0))
 with r1[1]:
-    st.metric("Fraud Rings Found", st.session_state.get("kpi_frauds", 3))
+    st.metric("Fraud Rings Found", st.session_state.get("kpi_frauds", 0))
 with r1[2]:
-    st.metric("Tax Saved (est.)", inr(st.session_state.get("kpi_tax_saved", 184200)))
+    st.metric("Tax Saved (est.)", inr(st.session_state.get("kpi_tax_saved", 0)))
 with r1[3]:
-    st.metric("Mismatches Caught", st.session_state.get("kpi_mismatches", 12))
+    st.metric("Mismatches Caught", st.session_state.get("kpi_mismatches", 0))
 with r2[0]:
-    st.metric("Vendors Scored", st.session_state.get("kpi_vendors", 6))
+    st.metric("Vendors Scored", st.session_state.get("kpi_vendors", 0))
 with r2[1]:
-    st.metric("Notices Generated", st.session_state.get("kpi_notices", 4))
+    st.metric("Notices Generated", st.session_state.get("kpi_notices", 0))
 with r2[2]:
-    st.metric("ITC Recovered", inr(st.session_state.get("kpi_itc_recovered", 1025000)))
+    st.metric("ITC Recovered", inr(st.session_state.get("kpi_itc_recovered", 0)))
 
 st.divider()
 
@@ -93,15 +64,22 @@ if hasattr(st, "page_link"):
         st.page_link("pages/3_📊_Tax_Saver.py", label="📊 Tax Saver", use_container_width=True)
     row2 = st.columns(4)
     with row2[0]:
-        st.page_link("pages/4_�_Reconciliation.py", label="🔄 Reconciliation", use_container_width=True)
+        st.page_link("pages/4_🔄_Reconciliation.py", label="🔄 Reconciliation", use_container_width=True)
     with row2[1]:
         st.page_link("pages/5_🏢_Vendor_Scores.py", label="🏢 Vendor Scores", use_container_width=True)
     with row2[2]:
         st.page_link("pages/6_📨_Notice_Generator.py", label="📨 Notice Generator", use_container_width=True)
     with row2[3]:
         st.page_link("pages/7_📋_ITC_Recovery.py", label="📋 ITC Recovery", use_container_width=True)
+    row3 = st.columns(3)
+    with row3[0]:
+        st.page_link("pages/8_📥_Data_Ingestion.py", label="📥 Data Ingestion", use_container_width=True)
+    with row3[1]:
+        st.page_link("pages/9_🔍_Audit_Trail.py", label="🔍 Audit Trail", use_container_width=True)
+    with row3[2]:
+        st.page_link("pages/10_📈_Predictive_Risk.py", label="📈 Predictive Risk", use_container_width=True)
 else:
-    st.info("Use the left sidebar to navigate between all 7 pages.")
+    st.info("Use the left sidebar to navigate between all 10 pages.")
 
 st.divider()
 
@@ -150,8 +128,11 @@ st.info(
     "4. **Reconciliation** → Click Run → instant GSTR-1 vs 2B diff with 5 mismatch types\n"
     "5. **Vendor Scores** → Load vendors → see AAA-D grades with radar charts\n"
     "6. **Notice Generator** → Fill form → generate Section 73 SCN\n"
-    "7. **ITC Recovery** → Full Kanban pipeline from detection to recovery"
+    "7. **ITC Recovery** → Full Kanban pipeline from detection to recovery\n"
+    "8. **Data Ingestion** → Ingest GSTR-1, GSTR-2B, Purchase Register, e-Invoice with preview\n"
+    "9. **Audit Trail** → Explainable multi-hop audit trail with legal references & NL explanations\n"
+    "10. **Predictive Risk** → ML-powered vendor compliance forecast with confidence bands"
 )
 
-st.caption("Powered by Claude AI · OCR by Tesseract · Graph by Neo4j/networkx · NEXUS Scoring · WhatsApp via Twilio · Reports by fpdf2")
+st.caption("Powered by Gemini AI · OCR by Tesseract · Graph by Neo4j/networkx · NEXUS Scoring · WhatsApp via Twilio · Reports by fpdf2")
 

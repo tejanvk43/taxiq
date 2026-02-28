@@ -2,7 +2,7 @@ import time
 from collections import defaultdict
 from typing import DefaultDict
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 
 from backend.core.nexus_scorer import NexusScorer
 
@@ -33,27 +33,77 @@ async def get_vendor_score(gstin: str):
 
 @router.get("/list")
 async def list_vendors(risk_level: str | None = None, sort_by: str = "nexusScore", order: str = "desc"):
-    _ = sort_by
-    _ = order
     scorer = NexusScorer()
-    demo = ["19AABCG1234Q1Z2", "27AAACF9999K1Z9", "07AABCS7777H1Z1"]
-    items = [await scorer.calculate_score(x) for x in demo]
-    if risk_level:
-        if risk_level == "HIGH":
-            items = [x for x in items if x["nexusScore"] < 40]
-        elif risk_level == "MEDIUM":
-            items = [x for x in items if 40 <= x["nexusScore"] < 70]
-        elif risk_level == "LOW":
-            items = [x for x in items if x["nexusScore"] >= 70]
+    items = await scorer.get_all_vendor_scores(risk_level=risk_level)
+    reverse = order.lower() == "desc"
+    items.sort(key=lambda x: x.get(sort_by, x.get("nexusScore", 0)), reverse=reverse)
     return {"vendors": items}
 
 
 @router.get("/{gstin}/history")
-async def get_vendor_history(gstin: str, months: int = 12):
+async def get_vendor_history(gstin: str, months: int = Query(default=6, le=12)):
     scorer = NexusScorer()
-    base = await scorer.calculate_score(gstin=gstin)
-    history = []
-    score = base["nexusScore"]
-    for i in range(months):
-        history.append({"monthOffset": i, "score": max(5, min(99, score - i * 2))})
+    history = await scorer.get_vendor_history(gstin=gstin, months=months)
     return {"gstin": gstin, "history": history}
+
+
+@router.get("/{gstin}/predict")
+async def predict_vendor_risk(gstin: str, months_ahead: int = Query(default=3, le=6)):
+    """Predictive vendor compliance risk model using historical patterns."""
+    scorer = NexusScorer()
+    current = await scorer.calculate_score(gstin=gstin)
+    history = await scorer.get_vendor_history(gstin=gstin, months=6)
+
+    # Compute trend slope from history
+    scores = [h["score"] for h in history]
+    if len(scores) >= 2:
+        slope = (scores[-1] - scores[0]) / max(len(scores) - 1, 1)
+    else:
+        slope = 0
+
+    predictions = []
+    current_score = current["nexusScore"]
+    for i in range(1, months_ahead + 1):
+        predicted = max(5, min(99, int(current_score + slope * i)))
+        risk_flag = "IMPROVING" if slope > 1 else "DECLINING" if slope < -1 else "STABLE"
+        predictions.append({
+            "month_offset": i,
+            "predicted_score": predicted,
+            "predicted_grade": scorer._grade(predicted),
+            "risk_flag": risk_flag,
+            "confidence": round(max(0.5, 0.95 - i * 0.08), 2),
+        })
+
+    # Risk factors
+    factors = current.get("factors", {})
+    risk_factors = []
+    for factor, val in factors.items():
+        if val < 50:
+            risk_factors.append({
+                "factor": factor.replace("_", " ").title(),
+                "score": val,
+                "severity": "HIGH" if val < 30 else "MEDIUM",
+                "recommendation": _get_recommendation(factor, val),
+            })
+
+    return {
+        "gstin": gstin,
+        "current_score": current_score,
+        "current_grade": current.get("nexusGrade", ""),
+        "trend": current.get("trend", "FLAT"),
+        "slope": round(slope, 2),
+        "predictions": predictions,
+        "risk_factors": risk_factors,
+        "overall_outlook": "IMPROVING" if slope > 1 else "DECLINING" if slope < -1 else "STABLE",
+    }
+
+
+def _get_recommendation(factor: str, score: int) -> str:
+    recommendations = {
+        "filing_regularity": "Ensure GSTR-1 and GSTR-3B are filed before due dates. Set up auto-reminders.",
+        "itc_accuracy": "Reconcile purchase register with GSTR-2B monthly. Verify all ITC claims.",
+        "turnover_consistency": "Maintain consistent revenue declarations. Sudden spikes trigger scrutiny.",
+        "network_trustworthiness": "Review counterparty GSTINs. Avoid transacting with flagged entities.",
+        "amendment_frequency": "Reduce amendments by verifying invoice details before filing.",
+    }
+    return recommendations.get(factor, "Monitor this metric and take corrective action.")

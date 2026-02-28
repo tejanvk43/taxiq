@@ -1,40 +1,19 @@
 import os
+import sys
 
 import httpx
 import streamlit as st
 from pyvis.network import Network
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from theme import inject_css, api_get, api_post, BACKEND_URL
 
-BACKEND_URL = os.getenv("TAXIQ_BACKEND_URL", "http://localhost:8000")
-
-st.markdown(
-    """
-<style>
-section.main { background-color: #0A1628; }
-.taxiq-badge {
-  display:inline-block; padding:2px 8px; border-radius:999px;
-  border:1px solid rgba(255,153,51,.55);
-  background: rgba(255,153,51,.10);
-  color: #FF9933; font-size: 12px;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
+st.set_page_config(page_title="TaxIQ | Fraud Graph", page_icon="🕸️", layout="wide")
+inject_css()
 
 
-st.markdown("## 🕸️ ITC Fraud Detection Agent")
-st.caption("Knowledge Graph → circular chain detection → risk scoring")
-
-
-def api_post(path: str):
-    with httpx.Client(timeout=90) as client:
-        return client.post(f"{BACKEND_URL}{path}")
-
-
-def api_get(path: str):
-    with httpx.Client(timeout=90) as client:
-        return client.get(f"{BACKEND_URL}{path}")
+st.markdown('<div class="page-title">🕸️ ITC Fraud Detection Agent</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-subtitle">Knowledge Graph → circular chain detection → risk scoring</div>', unsafe_allow_html=True)
 
 
 top = st.columns(4)

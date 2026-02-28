@@ -3,50 +3,17 @@ TaxIQ — 🏢 NEXUS Vendor Compliance Scores
 5-factor AI scoring → AAA to D grades → OCEN loan eligibility.
 """
 import os
+import sys
 
 import httpx
 import plotly.graph_objects as go
 import streamlit as st
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from theme import inject_css, fmt_inr, api_get, BACKEND_URL, CHART_LAYOUT, COLORS
+
 st.set_page_config(page_title="TaxIQ | Vendor Scores", page_icon="🏢", layout="wide")
-
-BACKEND = os.getenv("TAXIQ_BACKEND_URL", "http://localhost:8000")
-
-# ── Design System CSS ───────────────────────────────────
-st.markdown("""<style>
-    .stApp { background-color: #0A1628; color: #F8F9FA; }
-    .stMetric { background: #0D1F3C; border-radius: 12px;
-                padding: 16px; border-left: 4px solid #FF9933; }
-    .stButton>button { background: #FF9933; color: #0A1628;
-                       font-weight: 700; border-radius: 8px;
-                       border: none; }
-    .stDataFrame { background: #0D1F3C; }
-    div[data-testid="metric-container"] {
-      background: #0D1F3C; border-radius: 10px; padding: 10px; }
-    .demo-badge {
-      display:inline-block; padding:2px 10px; border-radius:999px;
-      background:rgba(253,203,110,.15); border:1px solid #FDCB6E;
-      color:#FDCB6E; font-size:12px; font-weight:600; }
-    .grade-aaa { background:#00B894; color:#0A1628; padding:4px 12px;
-                 border-radius:6px; font-weight:700; font-size:18px; }
-    .grade-a   { background:#FDCB6E; color:#0A1628; padding:4px 12px;
-                 border-radius:6px; font-weight:700; font-size:18px; }
-    .grade-b   { background:#FF9933; color:#0A1628; padding:4px 12px;
-                 border-radius:6px; font-weight:700; font-size:18px; }
-    .grade-d   { background:#D63031; color:#F8F9FA; padding:4px 12px;
-                 border-radius:6px; font-weight:700; font-size:18px; }
-</style>""", unsafe_allow_html=True)
-
-
-def fmt_inr(n):
-    if n >= 1e7: return f"₹{n/1e7:.1f}Cr"
-    if n >= 1e5: return f"₹{n/1e5:.1f}L"
-    return f"₹{n:,.0f}"
-
-
-def api_get(path, params=None):
-    with httpx.Client(timeout=30) as c:
-        return c.get(f"{BACKEND}{path}", params=params)
+inject_css()
 
 
 def grade_css(grade: str) -> str:
@@ -59,71 +26,15 @@ def grade_css(grade: str) -> str:
 
 def grade_color(grade: str) -> str:
     g = grade.upper()
-    if g in ("AAA", "AA"): return "#00B894"
-    if g in ("A", "BBB"): return "#FDCB6E"
-    if g in ("BB", "B"): return "#FF9933"
-    return "#D63031"
-
-
-# ── DEMO DATA ──────────────────────────────────────────
-DEMO_VENDORS = [
-    {
-        "gstin": "27AAACF9999K1Z9", "name": "Falcon Components Pvt Ltd",
-        "nexusGrade": "AA", "nexusScore": 82, "complianceScore": 88,
-        "loanEligible": True, "loanLimit": 2500000,
-        "factors": {"filing_regularity": 90, "itc_accuracy": 85, "turnover_consistency": 78,
-                    "network_trustworthiness": 80, "amendment_frequency": 92},
-    },
-    {
-        "gstin": "29AAACN0001A1Z5", "name": "Nexus Demo Manufacturing",
-        "nexusGrade": "AAA", "nexusScore": 91, "complianceScore": 95,
-        "loanEligible": True, "loanLimit": 5000000,
-        "factors": {"filing_regularity": 95, "itc_accuracy": 92, "turnover_consistency": 88,
-                    "network_trustworthiness": 90, "amendment_frequency": 96},
-    },
-    {
-        "gstin": "19AABCG1234Q1Z2", "name": "GoldStar Traders",
-        "nexusGrade": "D", "nexusScore": 18, "complianceScore": 22,
-        "loanEligible": False, "loanLimit": 0,
-        "factors": {"filing_regularity": 15, "itc_accuracy": 20, "turnover_consistency": 12,
-                    "network_trustworthiness": 25, "amendment_frequency": 18},
-    },
-    {
-        "gstin": "07AABCS7777H1Z1", "name": "Shadow Supplies Delhi",
-        "nexusGrade": "B", "nexusScore": 38, "complianceScore": 42,
-        "loanEligible": False, "loanLimit": 0,
-        "factors": {"filing_regularity": 45, "itc_accuracy": 30, "turnover_consistency": 35,
-                    "network_trustworthiness": 40, "amendment_frequency": 50},
-    },
-    {
-        "gstin": "24ABCPD6789Q1ZN", "name": "Patel Chemicals Gujarat",
-        "nexusGrade": "A", "nexusScore": 72, "complianceScore": 76,
-        "loanEligible": True, "loanLimit": 1500000,
-        "factors": {"filing_regularity": 80, "itc_accuracy": 68, "turnover_consistency": 70,
-                    "network_trustworthiness": 72, "amendment_frequency": 75},
-    },
-    {
-        "gstin": "33ABDCK3456N1ZT", "name": "Kumar Traders Chennai",
-        "nexusGrade": "BBB", "nexusScore": 65, "complianceScore": 68,
-        "loanEligible": True, "loanLimit": 800000,
-        "factors": {"filing_regularity": 70, "itc_accuracy": 62, "turnover_consistency": 60,
-                    "network_trustworthiness": 68, "amendment_frequency": 65},
-    },
-]
-
-DEMO_HISTORY = [
-    {"month": "Jul '24", "score": 75},
-    {"month": "Aug '24", "score": 78},
-    {"month": "Sep '24", "score": 76},
-    {"month": "Oct '24", "score": 80},
-    {"month": "Nov '24", "score": 82},
-    {"month": "Dec '24", "score": 85},
-]
+    if g in ("AAA", "AA"): return COLORS["green"]
+    if g in ("A", "BBB"): return COLORS["yellow"]
+    if g in ("BB", "B"): return COLORS["accent"]
+    return COLORS["red"]
 
 
 # ── Header ──────────────────────────────────────────────
-st.title("🏢 NEXUS Vendor Compliance Scores")
-st.caption("5-factor AI scoring → AAA to D grades → OCEN loan eligibility")
+st.markdown('<div class="page-title">🏢 NEXUS Vendor Compliance Scores</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-subtitle">5-factor AI scoring → AAA to D grades → OCEN loan eligibility</div>', unsafe_allow_html=True)
 
 # ── Load vendors ────────────────────────────────────────
 load_btn = st.button("📥 Load All Vendors", use_container_width=True, type="primary")
@@ -135,22 +46,18 @@ if load_btn:
             if r.status_code == 200:
                 data = r.json()
                 st.session_state["vendors"] = data.get("vendors", data if isinstance(data, list) else [])
-                st.session_state["vendors_demo"] = False
             else:
-                raise Exception(f"HTTP {r.status_code}")
-        except Exception:
-            st.session_state["vendors"] = DEMO_VENDORS
-            st.session_state["vendors_demo"] = True
+                st.error(f"Backend returned HTTP {r.status_code}")
+        except Exception as e:
+            st.error(f"Could not reach backend: {e}")
 
 if "vendors" not in st.session_state:
-    st.session_state["vendors"] = DEMO_VENDORS
-    st.session_state["vendors_demo"] = True
+    st.session_state["vendors"] = []
 
 vendors = st.session_state["vendors"]
-is_demo = st.session_state.get("vendors_demo", False)
 
-if is_demo:
-    st.markdown('<span class="demo-badge">[DEMO DATA]</span>', unsafe_allow_html=True)
+if not vendors:
+    st.info("Click **Load All Vendors** to fetch vendor scores from the backend.")
 
 st.divider()
 
@@ -204,9 +111,7 @@ for row_start in range(0, len(vendors), cols_per_row):
                         line_color=grade_color(grade),
                     ))
                     fig.update_layout(
-                        template="plotly_dark",
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        plot_bgcolor="rgba(0,0,0,0)",
+                        **CHART_LAYOUT,
                         polar=dict(radialaxis=dict(range=[0, 100], showticklabels=False)),
                         showlegend=False,
                         height=200,
@@ -265,14 +170,13 @@ if selected:
 
     with right:
         st.markdown("#### Score History (Last 6 Months)")
+        hist = []
         try:
             r = api_get(f"/api/vendors/{gstin_sel}/history")
             if r.status_code == 200:
-                hist = r.json().get("history", DEMO_HISTORY)
-            else:
-                hist = DEMO_HISTORY
+                hist = r.json().get("history", [])
         except Exception:
-            hist = DEMO_HISTORY
+            pass
 
         months = [h.get("month", "") for h in hist]
         scores = [h.get("score", 0) for h in hist]
@@ -283,12 +187,8 @@ if selected:
             marker=dict(size=8),
         ))
         fig_line.update_layout(
-            template="plotly_dark",
-            paper_bgcolor="#0A1628",
-            plot_bgcolor="#0D1F3C",
-            font_color="#F8F9FA",
+            **CHART_LAYOUT,
             height=250,
-            margin=dict(l=20, r=20, t=10, b=10),
             yaxis=dict(range=[0, 100]),
         )
         st.plotly_chart(fig_line, use_container_width=True)

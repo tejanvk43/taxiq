@@ -1,33 +1,19 @@
 import json
 import os
+import sys
 import random
 
 import httpx
 import streamlit as st
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from theme import inject_css, inr, fmt_inr, api_get, api_post, BACKEND_URL
 
-BACKEND_URL = os.getenv("TAXIQ_BACKEND_URL", "http://localhost:8000")
+st.set_page_config(page_title="TaxIQ | GST Filing", page_icon="📸", layout="wide")
+inject_css()
 
-
-def inr(x: float) -> str:
-    try:
-        n = int(round(float(x)))
-    except Exception:
-        return f"₹{x}"
-    s = str(abs(n))
-    if len(s) <= 3:
-        out = s
-    else:
-        out = s[-3:]
-        s = s[:-3]
-        while s:
-            out = s[-2:] + "," + out
-            s = s[:-2]
-    return ("-₹" if n < 0 else "₹") + out
-
-
-st.markdown("## 📸 GST Invoice OCR Agent")
-st.caption("Upload invoice (JPG/PNG/PDF) → OCR → Parsed Invoice → GSTR‑1 entry")
+st.markdown('<div class="page-title">📸 GST Invoice OCR Agent</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-subtitle">Upload invoice (JPG/PNG/PDF) → OCR → Parsed Invoice → GSTR‑1 entry</div>', unsafe_allow_html=True)
 
 left, right = st.columns([0.4, 0.6], gap="large")
 

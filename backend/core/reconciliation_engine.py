@@ -34,7 +34,7 @@ class ReconciliationEngine:
         gstr1_data = await self.client.get_gstr1(gstin=gstin, period=period)
         gstr1_invoices = self._extract_invoices(gstr1_data)
 
-        gstr2b_invoices = self._generate_gstr2b_mock(gstr1_invoices)
+        gstr2b_invoices = self._generate_gstr2b_mock(gstr1_invoices, gstin=gstin)
 
         gstr1_map = {inv["inum"]: inv for inv in gstr1_invoices}
         gstr2b_map = {inv["inum"]: inv for inv in gstr2b_invoices}
@@ -140,7 +140,7 @@ class ReconciliationEngine:
 
     # ── GSTR-2B mock generator ──────────────────────────
 
-    def _generate_gstr2b_mock(self, gstr1_invoices: list) -> list:
+    def _generate_gstr2b_mock(self, gstr1_invoices: list, gstin: str = "") -> list:
         """
         Create GSTR-2B from GSTR-1 with intentional realistic errors:
         - 70% appear correctly
@@ -148,7 +148,9 @@ class ReconciliationEngine:
         - 10% are completely missing (TYPE_1)
         - 5% have wrong buyer GSTIN (TYPE_4)
         """
-        rng = random.Random(42)
+        # Seed from GSTIN so different vendors produce different error patterns
+        seed = hash(gstin) & 0xFFFFFFFF if gstin else 42
+        rng = random.Random(seed)
         out = []
         for inv in gstr1_invoices:
             r = rng.random()
